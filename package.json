@@ -2,7 +2,7 @@
   "name": "conflict-radar",
   "version": "1.0.0",
   "description": "Monitor de conflitos em tempo real",
-  "main": "servidor.js"
+  "main": "servidor.js",
   "scripts": {
     "start": "node servidor.js"
   },
