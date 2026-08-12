@@ -4,6 +4,7 @@ const Parser = require('rss-parser');
 const cors = require('cors');
 const http = require('http');
 const path = require('path');
+const { salvarEvento, carregarEventos, testarBanco } = require('./database');
 
 const app = express();
 const server = http.createServer(app);
@@ -109,7 +110,15 @@ async function lerFeeds() {
           tipo, pais: cidade.pais, cidade: cidade.nome,
           lat: cidade.lat, lng: cidade.lng,
         };
-        if (adicionarEvento(evento)) novos.push(evento);
+
+        if (adicionarEvento(evento)) {
+          novos.push(evento);
+          try {
+            await salvarEvento(evento);
+          } catch (dbError) {
+            console.error(`Erro ao salvar evento no PostgreSQL (${feed.nome}):`, dbError.message);
+          }
+        }
       }
     } catch (err) {
       console.error(`Erro ao ler feed ${feed.nome}:`, err.message);
@@ -130,10 +139,27 @@ wss.on('connection', (ws) => {
 
 app.get('/api/eventos', (req, res) => res.json(eventos));
 
-const PORTA = process.env.PORT || 3000;
-server.listen(PORTA, () => {
-  console.log(`Conflict Radar rodando na porta ${PORTA}`);
-  lerFeeds();
-  setInterval(lerFeeds, 30000);
-});
+async function iniciar() {
+  try {
+    const bancoAtivo = await testarBanco();
+    if (bancoAtivo) {
+      console.log('PostgreSQL conectado com sucesso.');
+      const historico = await carregarEventos(200);
+      historico.reverse().forEach(evento => adicionarEvento(evento));
+      console.log(`${historico.length} eventos carregados do PostgreSQL.`);
+    } else {
+      console.warn('PostgreSQL não configurado. O servidor usará apenas memória.');
+    }
+  } catch (err) {
+    console.error('Não foi possível conectar ao PostgreSQL:', err.message);
+  }
 
+  const PORTA = process.env.PORT || 3000;
+  server.listen(PORTA, () => {
+    console.log(`Conflict Radar rodando na porta ${PORTA}`);
+    lerFeeds();
+    setInterval(lerFeeds, 30000);
+  });
+}
+
+iniciar();
