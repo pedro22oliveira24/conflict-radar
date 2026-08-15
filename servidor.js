@@ -19,46 +19,155 @@ app.use(express.static(path.join(__dirname, 'public')));
 // POSTGRESQL
 // ============================================================
 
-const pool = process.env.DATABASE_URL
-  ? new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: {
+let pool = null;
+
+function criarPool() {
+  const databaseUrl = process.env.DATABASE_URL;
+
+  if (!databaseUrl) {
+    console.log('DATABASE_URL não encontrada.');
+    console.log('Servidor funcionando sem PostgreSQL.');
+    return null;
+  }
+
+  try {
+    const url = new URL(databaseUrl);
+
+    // Verifica se a URL exige SSL.
+    const sslmode = url.searchParams.get('sslmode');
+
+    // Remove sslmode da URL para evitar conflito
+    // entre a connection string e a configuração SSL do pg.
+    url.searchParams.delete('sslmode');
+
+    const configuracao = {
+      connectionString: url.toString(),
+
+      max: 5,
+
+      idleTimeoutMillis: 30000,
+
+      connectionTimeoutMillis: 10000
+    };
+
+    // Se a URL original tinha sslmode=require,
+    // usamos TLS sem exigir validação do certificado.
+    if (sslmode === 'require') {
+      configuracao.ssl = {
         rejectUnauthorized: false
-      }
-    })
-  : null;
+      };
+    }
+
+    const novoPool = new Pool(configuracao);
+
+    novoPool.on('error', (erro) => {
+      console.error(
+        'Erro inesperado no pool PostgreSQL:',
+        erro.message
+      );
+    });
+
+    return novoPool;
+
+  } catch (erro) {
+    console.error(
+      'Não foi possível interpretar DATABASE_URL:',
+      erro.message
+    );
+
+    return null;
+  }
+}
+
+pool = criarPool();
+
+// ============================================================
+// TESTAR CONEXÃO COM POSTGRESQL
+// ============================================================
+
+async function testarBanco() {
+  if (!pool) {
+    return false;
+  }
+
+  try {
+    const resultado = await pool.query('SELECT NOW() AS agora');
+
+    console.log(
+      'PostgreSQL conectado com sucesso!'
+    );
+
+    console.log(
+      `Horário do banco: ${resultado.rows[0].agora}`
+    );
+
+    return true;
+
+  } catch (erro) {
+    console.error(
+      'Falha ao conectar ao PostgreSQL:',
+      erro.message
+    );
+
+    return false;
+  }
+}
+
+// ============================================================
+// PREPARAR BANCO
+// ============================================================
 
 async function prepararBanco() {
   if (!pool) {
-    console.log('DATABASE_URL não encontrada.');
-    console.log('Servidor funcionando sem PostgreSQL.');
-    return;
+    return false;
   }
 
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS events (
         id SERIAL PRIMARY KEY,
+
         external_id TEXT UNIQUE NOT NULL,
+
         title TEXT NOT NULL,
+
         description TEXT,
+
         source TEXT,
-        url TEXT UNIQUE,
+
+        url TEXT,
+
         image TEXT,
+
         event_date TIMESTAMPTZ,
+
         category TEXT,
+
         country TEXT,
+
         city TEXT,
+
         latitude DOUBLE PRECISION,
+
         longitude DOUBLE PRECISION,
+
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
 
-    console.log('PostgreSQL conectado com sucesso!');
-    console.log('Tabela events pronta!');
+    console.log(
+      'Tabela events pronta!'
+    );
+
+    return true;
+
   } catch (erro) {
-    console.error('Erro ao preparar PostgreSQL:', erro.message);
+    console.error(
+      'Erro ao preparar PostgreSQL:',
+      erro.message
+    );
+
+    return false;
   }
 }
 
@@ -71,14 +180,17 @@ const FEEDS = [
     nome: 'BBC News',
     url: 'https://feeds.bbci.co.uk/news/world/rss.xml'
   },
+
   {
     nome: 'Al Jazeera',
     url: 'https://www.aljazeera.com/xml/rss/all.xml'
   },
+
   {
     nome: 'DW News',
     url: 'https://rss.dw.com/xml/rss-en-world'
   },
+
   {
     nome: 'France 24',
     url: 'https://www.france24.com/en/rss'
@@ -86,7 +198,7 @@ const FEEDS = [
 ];
 
 // ============================================================
-// CIDADES E COORDENADAS
+// CIDADES
 // ============================================================
 
 const CIDADES = [
@@ -185,14 +297,19 @@ function classificar(texto) {
 }
 
 // ============================================================
-// DETECÇÃO DE CIDADE
+// DETECTAR CIDADE
 // ============================================================
 
 function detectarCidade(texto) {
-  if (!texto) return null;
+  if (!texto) {
+    return null;
+  }
 
   for (const cidade of CIDADES) {
-    const regex = new RegExp(`\\b${cidade.nome}\\b`, 'i');
+    const regex = new RegExp(
+      `\\b${cidade.nome}\\b`,
+      'i'
+    );
 
     if (regex.test(texto)) {
       return cidade;
@@ -203,7 +320,7 @@ function detectarCidade(texto) {
 }
 
 // ============================================================
-// MEMÓRIA LOCAL
+// MEMÓRIA
 // ============================================================
 
 const eventos = [];
@@ -215,6 +332,7 @@ function adicionarEventoMemoria(evento) {
   }
 
   idsVistos.add(evento.id);
+
   eventos.unshift(evento);
 
   if (eventos.length > 200) {
@@ -225,7 +343,7 @@ function adicionarEventoMemoria(evento) {
 }
 
 // ============================================================
-// SALVAR EVENTO NO POSTGRESQL
+// SALVAR EVENTO
 // ============================================================
 
 async function salvarEvento(evento) {
@@ -251,10 +369,23 @@ async function salvarEvento(evento) {
         longitude
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10, $11, $12
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8,
+        $9,
+        $10,
+        $11,
+        $12
       )
-      ON CONFLICT (external_id) DO NOTHING
+
+      ON CONFLICT (external_id)
+      DO NOTHING
+
       RETURNING id
       `,
       [
@@ -274,9 +405,11 @@ async function salvarEvento(evento) {
     );
 
     return resultado.rowCount > 0;
+
   } catch (erro) {
     console.error(
-      `Erro ao salvar evento no PostgreSQL: ${erro.message}`
+      'Erro ao salvar evento no PostgreSQL:',
+      erro.message
     );
 
     return false;
@@ -284,7 +417,7 @@ async function salvarEvento(evento) {
 }
 
 // ============================================================
-// CARREGAR HISTÓRICO DO POSTGRESQL
+// CARREGAR HISTÓRICO
 // ============================================================
 
 async function carregarHistorico() {
@@ -307,8 +440,11 @@ async function carregarHistorico() {
         city AS cidade,
         latitude AS lat,
         longitude AS lng
+
       FROM events
+
       ORDER BY event_date DESC NULLS LAST
+
       LIMIT 200;
     `);
 
@@ -319,15 +455,17 @@ async function carregarHistorico() {
     console.log(
       `Histórico carregado: ${resultado.rows.length} eventos.`
     );
+
   } catch (erro) {
     console.error(
-      `Erro ao carregar histórico: ${erro.message}`
+      'Erro ao carregar histórico:',
+      erro.message
     );
   }
 }
 
 // ============================================================
-// LER FEEDS RSS
+// LER FEEDS
 // ============================================================
 
 async function lerFeeds() {
@@ -342,6 +480,7 @@ async function lerFeeds() {
       const resultado = await parser.parseURL(feed.url);
 
       for (const item of resultado.items) {
+
         const textoCompleto = `
           ${item.title || ''}
           ${item.contentSnippet || ''}
@@ -350,8 +489,6 @@ async function lerFeeds() {
 
         const cidade = detectarCidade(textoCompleto);
 
-        // Só transforma a notícia em evento
-        // quando conseguimos localizar uma cidade.
         if (!cidade) {
           continue;
         }
@@ -366,49 +503,79 @@ async function lerFeeds() {
 
         const evento = {
           id,
-          titulo: item.title || 'Sem título',
-          descricao: item.contentSnippet || '',
-          fonte: feed.nome,
-          url: item.link || null,
-          imagem: item.enclosure?.url || null,
-          data: item.isoDate || item.pubDate || new Date().toISOString(),
+
+          titulo:
+            item.title ||
+            'Sem título',
+
+          descricao:
+            item.contentSnippet ||
+            '',
+
+          fonte:
+            feed.nome,
+
+          url:
+            item.link ||
+            null,
+
+          imagem:
+            item.enclosure?.url ||
+            null,
+
+          data:
+            item.isoDate ||
+            item.pubDate ||
+            new Date().toISOString(),
+
           tipo,
-          pais: cidade.pais,
-          cidade: cidade.nome,
-          lat: cidade.lat,
-          lng: cidade.lng
+
+          pais:
+            cidade.pais,
+
+          cidade:
+            cidade.nome,
+
+          lat:
+            cidade.lat,
+
+          lng:
+            cidade.lng
         };
 
-        // Primeiro verifica se já conhecemos esse evento.
+        // Já conhecemos esse evento?
         if (idsVistos.has(evento.id)) {
           continue;
         }
 
-        // Salva no banco.
-        const salvoNoBanco = await salvarEvento(evento);
+        // Se houver PostgreSQL, salva primeiro.
+        if (pool) {
+          const salvo = await salvarEvento(evento);
 
-        // Mesmo sem banco, mantemos o servidor funcionando.
-        // Se o banco estiver disponível, o retorno indica
-        // se foi realmente inserido.
-        if (pool && !salvoNoBanco) {
-          continue;
+          if (!salvo) {
+            continue;
+          }
         }
 
         if (adicionarEventoMemoria(evento)) {
           novos.push(evento);
         }
       }
-    } catch (err) {
+
+    } catch (erro) {
       console.error(
         `Erro ao ler feed ${feed.nome}:`,
-        err.message
+        erro.message
       );
     }
 
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await new Promise(resolve =>
+      setTimeout(resolve, 150)
+    );
   }
 
   if (novos.length > 0) {
+
     console.log(
       `${novos.length} novos eventos encontrados.`
     );
@@ -417,8 +584,12 @@ async function lerFeeds() {
       tipo: 'novos_eventos',
       dados: novos
     });
+
   } else {
-    console.log('Nenhum evento novo.');
+
+    console.log(
+      'Nenhum evento novo.'
+    );
   }
 }
 
@@ -430,16 +601,20 @@ function broadcast(mensagem) {
   const texto = JSON.stringify(mensagem);
 
   wss.clients.forEach(cliente => {
+
     if (cliente.readyState === 1) {
       cliente.send(texto);
     }
+
   });
 }
 
 wss.on('connection', (ws) => {
-  console.log('Novo cliente conectado ao WebSocket.');
 
-  // Envia o histórico já carregado do PostgreSQL.
+  console.log(
+    'Novo cliente conectado ao WebSocket.'
+  );
+
   ws.send(
     JSON.stringify({
       tipo: 'todos_eventos',
@@ -448,8 +623,13 @@ wss.on('connection', (ws) => {
   );
 
   ws.on('close', () => {
-    console.log('Cliente WebSocket desconectado.');
+
+    console.log(
+      'Cliente WebSocket desconectado.'
+    );
+
   });
+
 });
 
 // ============================================================
@@ -460,57 +640,94 @@ app.get('/api/eventos', (req, res) => {
   res.json(eventos);
 });
 
-// Endpoint para verificar o estado do servidor
 app.get('/health', async (req, res) => {
-  let banco = 'não configurado';
 
-  if (pool) {
-    try {
-      await pool.query('SELECT 1');
-      banco = 'conectado';
-    } catch (erro) {
-      banco = 'erro';
-    }
+  if (!pool) {
+
+    return res.status(503).json({
+      status: 'ok',
+      servidor: 'Conflict Radar',
+      banco: 'não configurado'
+    });
+
   }
 
-  res.json({
-    status: 'ok',
-    servidor: 'Conflict Radar',
-    banco
-  });
+  try {
+
+    await pool.query('SELECT 1');
+
+    res.json({
+      status: 'ok',
+      servidor: 'Conflict Radar',
+      banco: 'conectado'
+    });
+
+  } catch (erro) {
+
+    res.status(503).json({
+      status: 'erro',
+      servidor: 'Conflict Radar',
+      banco: 'desconectado',
+      erro: erro.message
+    });
+
+  }
+
 });
 
 // ============================================================
 // INICIAR SERVIDOR
 // ============================================================
 
-const PORTA = process.env.PORT || 3000;
+const PORTA =
+  process.env.PORT ||
+  3000;
 
 async function iniciar() {
-  try {
+
+  console.log(
+    'Iniciando Conflict Radar...'
+  );
+
+  // Primeiro testa a conexão.
+  const bancoConectado =
+    await testarBanco();
+
+  if (bancoConectado) {
+
     await prepararBanco();
 
     await carregarHistorico();
 
-    server.listen(PORTA, () => {
-      console.log(
-        `Conflict Radar rodando na porta ${PORTA}`
-      );
+  } else {
 
-      // Primeira atualização
-      lerFeeds();
-
-      // Atualiza a cada 30 segundos
-      setInterval(lerFeeds, 30000);
-    });
-  } catch (erro) {
-    console.error(
-      'Erro ao iniciar o Conflict Radar:',
-      erro
+    console.log(
+      'PostgreSQL indisponível no momento.'
     );
 
-    process.exit(1);
+    console.log(
+      'O servidor continuará tentando funcionar.'
+    );
+
   }
+
+  server.listen(PORTA, () => {
+
+    console.log(
+      `Conflict Radar rodando na porta ${PORTA}`
+    );
+
+    // Primeira atualização.
+    lerFeeds();
+
+    // Atualiza a cada 30 segundos.
+    setInterval(
+      lerFeeds,
+      30000
+    );
+
+  });
+
 }
 
 iniciar();
