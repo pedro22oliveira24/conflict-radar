@@ -1,16 +1,31 @@
 let map, markers, todosEventos = [], filtroAtual = 'todos', paisAtual = null;
 
-// Inicializa o Mapa
+function escaparHTML(valor) {
+    return String(valor ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function normalizarData(data) {
+    if (!data) return 'Data não informada';
+    const d = new Date(data);
+    return Number.isNaN(d.getTime()) ? String(data) : d.toLocaleString('pt-BR');
+}
+
 function initMap() {
     map = L.map('map').setView([20, 0], 2);
+
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
+
     markers = L.markerClusterGroup();
     map.addLayer(markers);
 }
 
-// Conecta WebSocket
 function conectarWS() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}`);
@@ -21,6 +36,11 @@ function conectarWS() {
         status.className = 'status-conectado';
     };
 
+    ws.onerror = () => {
+        status.textContent = '⚠️ Erro na conexão';
+        status.className = 'status-desconectado';
+    };
+
     ws.onclose = () => {
         status.textContent = '❌ Desconectado (tentando reconectar...)';
         status.className = 'status-desconectado';
@@ -28,24 +48,40 @@ function conectarWS() {
     };
 
     ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        if (msg.tipo === 'todos_eventos') {
-            todosEventos = msg.dados;
-            atualizarInterface();
-        } else if (msg.tipo === 'novos_eventos') {
-            todosEventos = [...msg.dados, ...todosEventos].slice(0, 500);
-            atualizarInterface();
+        try {
+            const msg = JSON.parse(event.data);
+
+            if (msg.tipo === 'todos_eventos') {
+                todosEventos = Array.isArray(msg.dados) ? msg.dados : [];
+                atualizarInterface();
+            } else if (msg.tipo === 'novos_eventos') {
+                const novos = Array.isArray(msg.dados) ? msg.dados : [];
+                const ids = new Set(todosEventos.map(e => String(e.id)));
+                const unicos = novos.filter(e => !ids.has(String(e.id)));
+                todosEventos = [...unicos, ...todosEventos].slice(0, 500);
+                atualizarInterface();
+            }
+        } catch (erro) {
+            console.error('Mensagem WebSocket inválida:', erro);
         }
     };
 }
 
+function eventoCombinaPesquisa(e, pesquisa) {
+    const texto = [e.titulo, e.cidade, e.pais, e.fonte, e.tipo]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+    return !pesquisa || texto.includes(pesquisa);
+}
+
 function atualizarInterface() {
+    const pesquisa = document.getElementById('pesquisa').value.trim().toLowerCase();
+
     const filtrados = todosEventos.filter(e => {
         const matchTipo = filtroAtual === 'todos' || e.tipo === filtroAtual;
         const matchPais = !paisAtual || e.pais === paisAtual;
-        const pesquisa = document.getElementById('pesquisa').value.toLowerCase();
-        const matchBusca = !pesquisa || e.titulo.toLowerCase().includes(pesquisa) || e.cidade.toLowerCase().includes(pesquisa) || e.pais.toLowerCase().includes(pesquisa);
-        return matchTipo && matchPais && matchBusca;
+        return matchTipo && matchPais && eventoCombinaPesquisa(e, pesquisa);
     });
 
     atualizarMapa(filtrados);
@@ -56,14 +92,33 @@ function atualizarInterface() {
 
 function atualizarMapa(eventos) {
     markers.clearLayers();
+
     eventos.forEach(e => {
-        const marker = L.marker([e.lat, e.lng]);
+        if (!Number.isFinite(Number(e.lat)) || !Number.isFinite(Number(e.lng))) return;
+
+        const marker = L.marker([Number(e.lat), Number(e.lng)]);
+        const titulo = escaparHTML(e.titulo || 'Evento sem título');
+        const cidade = escaparHTML(e.cidade || 'Local não informado');
+        const pais = escaparHTML(e.pais || 'País não informado');
+        const descricao = escaparHTML(e.descricao || 'Sem descrição.');
+        const tipo = escaparHTML(e.tipo || 'outro');
+
         marker.bindPopup(`
-            <b>${e.titulo}</b><br>
-            <i>${e.cidade}, ${e.pais}</i><br>
-            <p>${e.descricao.substring(0, 100)}...</p>
-            <button onclick="verDetalhes('${e.id}')">Ver Detalhes</button>
+            <div class="popup-evento">
+                <strong>${titulo}</strong>
+                <div><i>${cidade}, ${pais}</i></div>
+                <div class="popup-tipo">${tipo}</div>
+                <p>${descricao.length > 140 ? `${descricao.substring(0, 140)}...` : descricao}</p>
+                <button class="popup-detalhes" onclick="verDetalhes(${JSON.stringify(String(e.id))})">
+                    Ver detalhes
+                </button>
+            </div>
         `);
+
+        marker.on('click', () => {
+            // Mantém o popup como primeira interação; o botão abre o painel completo.
+        });
+
         markers.addLayer(marker);
     });
 }
@@ -71,27 +126,55 @@ function atualizarMapa(eventos) {
 function atualizarFeed(eventos) {
     const lista = document.getElementById('lista-noticias');
     lista.innerHTML = '';
+
+    if (!eventos.length) {
+        lista.innerHTML = '<div class="sem-eventos">Nenhum evento encontrado com os filtros atuais.</div>';
+        return;
+    }
+
     eventos.slice(0, 20).forEach(e => {
         const div = document.createElement('div');
         div.className = 'noticia';
+        div.tabIndex = 0;
         div.onclick = () => verDetalhes(e.id);
+        div.onkeydown = (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                verDetalhes(e.id);
+            }
+        };
+
+        const imagem = e.imagem
+            ? `<img src="${escaparHTML(e.imagem)}" alt="Imagem da notícia" loading="lazy" onerror="this.style.display='none'">`
+            : '';
+
         div.innerHTML = `
-            ${e.imagem ? `<img src="${e.imagem}">` : ''}
-            <h3>${e.titulo}</h3>
-            <p>${e.cidade}, ${e.pais} - ${new Date(e.data).toLocaleString()}</p>
+            ${imagem}
+            <div class="noticia-tipo">${escaparHTML(e.tipo || 'outro')}</div>
+            <h3>${escaparHTML(e.titulo || 'Sem título')}</h3>
+            <p>${escaparHTML(e.cidade || 'Local não informado')}, ${escaparHTML(e.pais || 'País não informado')}</p>
+            <small>${escaparHTML(normalizarData(e.data))} · ${escaparHTML(e.fonte || 'Fonte não informada')}</small>
+            <div class="noticia-acao">Clique para ver detalhes →</div>
         `;
+
         lista.appendChild(div);
     });
 }
 
 function atualizarEstatisticas(eventos) {
-    const contagem = { guerra: 0, ataque: 0, protesto: 0, diplomacia: 0, humanitario: 0, sancao: 0 };
-    eventos.forEach(e => { if (contagem[e.tipo] !== undefined) contagem[e.tipo]++; });
-    Object.keys(contagem).forEach(tipo => {
-        const el = document.getElementById(tipo === 'sancao' ? 'sancao' : tipo + (tipo.endsWith('s') ? '' : 's'));
-        if (el) el.textContent = contagem[tipo];
+    const contagem = {
+        guerra: 0,
+        ataque: 0,
+        protesto: 0,
+        diplomacia: 0,
+        humanitario: 0,
+        sancao: 0
+    };
+
+    eventos.forEach(e => {
+        if (contagem[e.tipo] !== undefined) contagem[e.tipo]++;
     });
-    // Fix for the ID mismatch in index.html (guerras vs guerra, etc)
+
     document.getElementById('guerras').textContent = contagem.guerra;
     document.getElementById('ataques').textContent = contagem.ataque;
     document.getElementById('protestos').textContent = contagem.protesto;
@@ -103,11 +186,25 @@ function atualizarEstatisticas(eventos) {
 function atualizarTimeline(eventos) {
     const lista = document.getElementById('timeline-lista');
     lista.innerHTML = '';
+
     eventos.slice(0, 10).forEach(e => {
         const div = document.createElement('div');
         div.className = 'evento';
+        div.tabIndex = 0;
         div.onclick = () => verDetalhes(e.id);
-        div.innerHTML = `<b>${e.titulo}</b><br><small>${e.cidade} - ${new Date(e.data).toLocaleTimeString()}</small>`;
+        div.onkeydown = (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                verDetalhes(e.id);
+            }
+        };
+
+        div.innerHTML = `
+            <b>${escaparHTML(e.titulo || 'Sem título')}</b>
+            <br>
+            <small>${escaparHTML(e.cidade || 'Local não informado')} · ${escaparHTML(normalizarData(e.data))}</small>
+        `;
+
         lista.appendChild(div);
     });
 }
@@ -126,26 +223,60 @@ function filtrarPais(pais) {
 }
 
 function verDetalhes(id) {
-    const e = todosEventos.find(ev => ev.id === id);
+    const e = todosEventos.find(ev => String(ev.id) === String(id));
     if (!e) return;
+
     const modal = document.getElementById('modal');
     const conteudo = document.getElementById('modal-conteudo');
+    const imagem = e.imagem
+        ? `<img class="modal-imagem" src="${escaparHTML(e.imagem)}" alt="Imagem da notícia" onerror="this.style.display='none'">`
+        : '';
+    const link = e.url
+        ? `<a class="modal-link" href="${escaparHTML(e.url)}" target="_blank" rel="noopener noreferrer">Ler notícia completa ↗</a>`
+        : '<div class="modal-sem-link">Link da notícia não disponível.</div>';
+
     conteudo.innerHTML = `
-        <h2>${e.titulo}</h2>
-        ${e.imagem ? `<img src="${e.imagem}" style="width:100%; border-radius:10px;">` : ''}
-        <p><b>Fonte:</b> ${e.fonte} | <b>Local:</b> ${e.cidade}, ${e.pais}</p>
-        <p>${e.descricao}</p>
-        <a href="${e.url}" target="_blank" style="display:block; margin-top:10px; background:#2563eb; color:white; padding:10px; border-radius:5px; text-align:center;">Ler notícia completa</a>
+        ${imagem}
+        <div class="modal-badge">${escaparHTML(e.tipo || 'outro')}</div>
+        <h2>${escaparHTML(e.titulo || 'Evento sem título')}</h2>
+        <div class="modal-meta">
+            <div><strong>📍 Local</strong><br>${escaparHTML(e.cidade || 'Não informado')}, ${escaparHTML(e.pais || 'Não informado')}</div>
+            <div><strong>📰 Fonte</strong><br>${escaparHTML(e.fonte || 'Não informada')}</div>
+            <div><strong>🕒 Data</strong><br>${escaparHTML(normalizarData(e.data))}</div>
+        </div>
+        <div class="modal-descricao">
+            <strong>Descrição</strong>
+            <p>${escaparHTML(e.descricao || 'Não há descrição disponível para este evento.')}</p>
+        </div>
+        ${link}
     `;
+
     modal.style.display = 'flex';
+    document.body.classList.add('modal-aberto');
 }
 
-// Eventos de UI
-document.getElementById('fechar').onclick = () => document.getElementById('feed').classList.remove('aberta');
-document.getElementById('fechar-modal').onclick = () => document.getElementById('modal').style.display = 'none';
+function fecharModal() {
+    const modal = document.getElementById('modal');
+    modal.style.display = 'none';
+    document.body.classList.remove('modal-aberto');
+}
+
+document.getElementById('fechar').onclick = () => {
+    document.getElementById('feed').classList.remove('aberta');
+};
+
+document.getElementById('fechar-modal').onclick = fecharModal;
+
+document.getElementById('modal').addEventListener('click', (event) => {
+    if (event.target.id === 'modal') fecharModal();
+});
+
 document.getElementById('pesquisa').oninput = atualizarInterface;
 
-// Inicialização
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') fecharModal();
+});
+
 window.onload = () => {
     initMap();
     conectarWS();
