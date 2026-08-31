@@ -327,3 +327,29 @@ body.modal-aberto { overflow: hidden; }
 .fonte-territorial span {
     color: #64748b;
 }
+
+
+/* ─── USUÁRIOS ───────────────────────────────────────────────────────────── */
+.topo { display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.botao-conta { background:#2563eb; color:#fff; border:0; border-radius:10px; padding:11px 16px; cursor:pointer; font-weight:bold; }
+.botao-conta:hover { background:#1d4ed8; }
+.modal-usuario { max-width:560px; }
+.abas-auth { display:flex; gap:8px; margin:15px 0; }
+.aba-auth { flex:1; padding:10px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:8px; cursor:pointer; }
+.aba-auth.ativa { background:#2563eb; color:white; border-color:#2563eb; }
+.form-auth { display:flex; flex-direction:column; gap:10px; }
+.form-auth input, .preferencia-bloco input, .preferencia-bloco select { padding:11px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; box-sizing:border-box; }
+.form-auth button, .linha-adicionar button, #salvar-filtros { padding:11px 14px; background:#2563eb; color:white; border:0; border-radius:8px; cursor:pointer; font-weight:bold; }
+.auth-erro { color:#dc2626; min-height:18px; }
+.auth-sucesso { color:#16a34a; min-height:18px; }
+.preferencia-bloco { border:1px solid #e2e8f0; background:#f8fafc; color:#0f172a; border-radius:10px; padding:14px; margin:14px 0; }
+.preferencia-bloco h3 { margin:0 0 5px; }
+.preferencia-bloco p { margin:0 0 10px; color:#64748b; font-size:13px; }
+.linha-adicionar { display:flex; gap:8px; flex-wrap:wrap; }
+.linha-adicionar input, .linha-adicionar select { flex:1; min-width:120px; }
+.chips { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:10px; }
+.chip, .alerta-item { display:inline-flex; align-items:center; gap:6px; background:#e0e7ff; color:#1e3a8a; padding:7px 9px; border-radius:999px; font-size:13px; }
+.chip button, .alerta-item button { border:0; background:transparent; color:#991b1b; cursor:pointer; font-weight:bold; }
+#lista-alertas { display:flex; flex-direction:column; gap:7px; margin-top:10px; }
+.alerta-item { justify-content:space-between; border-radius:8px; background:#fef3c7; color:#78350f; }
+.botao-sair { width:100%; padding:11px; border:0; border-radius:8px; background:#ef4444; color:white; cursor:pointer; font-weight:bold; }
