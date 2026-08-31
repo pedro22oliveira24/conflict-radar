@@ -352,6 +352,8 @@ function inicializarControlesInterface(){
 
   const botaoConta=document.getElementById('botao-conta');
   if(botaoConta) botaoConta.addEventListener('click',abrirUsuario);
+  const botaoCadastro=document.getElementById('botao-cadastro');
+  if(botaoCadastro) botaoCadastro.addEventListener('click',abrirCadastro);
 
   const botaoFecharUsuario=document.getElementById('fechar-usuario');
   if(botaoFecharUsuario) botaoFecharUsuario.addEventListener('click',fecharUsuario);
@@ -374,6 +376,10 @@ async function apiUsuario(url, options={}){
 function abrirUsuario(){
   document.getElementById('modal-usuario').style.display='flex';
   atualizarPainelUsuario();
+}
+function abrirCadastro(){
+  abrirUsuario();
+  document.querySelector('.aba-auth[data-auth="cadastro"]')?.click();
 }
 function fecharUsuario(){ document.getElementById('modal-usuario').style.display='none'; }
 function atualizarPainelUsuario(){
