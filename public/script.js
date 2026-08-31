@@ -378,9 +378,24 @@ function abrirUsuario(){
   atualizarPainelUsuario();
 }
 function abrirCadastro(){
-  abrirUsuario();
-  document.querySelector('.aba-auth[data-auth="cadastro"]')?.click();
+  const modal=document.getElementById('modal-usuario');
+  if(modal) modal.style.display='flex';
+  const auth=document.getElementById('auth-area');
+  const painel=document.getElementById('painel-usuario');
+  if(auth) auth.style.display='block';
+  if(painel) painel.style.display='none';
+  document.querySelectorAll('.aba-auth').forEach(x=>x.classList.remove('ativa'));
+  const aba=document.querySelector('.aba-auth[data-auth="cadastro"]');
+  if(aba) aba.classList.add('ativa');
+  const login=document.getElementById('form-login');
+  const cadastro=document.getElementById('form-cadastro');
+  if(login) login.style.display='none';
+  if(cadastro) cadastro.style.display='flex';
+  const erro=document.getElementById('auth-erro');
+  if(erro) erro.textContent='';
+  setTimeout(()=>document.getElementById('cadastro-nome')?.focus(),0);
 }
+window.abrirCadastro=abrirCadastro;
 function fecharUsuario(){ document.getElementById('modal-usuario').style.display='none'; }
 function atualizarPainelUsuario(){
   const logado=!!sessao;
