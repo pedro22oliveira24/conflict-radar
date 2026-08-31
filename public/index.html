@@ -15,8 +15,11 @@
 <body>
 
     <div class="topo">
-        <div class="logo">🌍 Conflict Radar</div>
-        <div class="subtitulo">Global Live Conflict Monitor</div>
+        <div>
+            <div class="logo">🌍 Conflict Radar</div>
+            <div class="subtitulo">Global Live Conflict Monitor</div>
+        </div>
+        <button id="botao-conta" class="botao-conta">👤 Entrar</button>
     </div>
 
     <div class="barra-paises">
@@ -84,6 +87,60 @@
             <div id="timeline">
                 <h2 class="timeline-titulo">🕒 Timeline</h2>
                 <div id="timeline-lista"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE USUÁRIO -->
+    <div id="modal-usuario" class="modal-fundo" style="display:none">
+        <div class="modal-caixa modal-usuario">
+            <button id="fechar-usuario">✖</button>
+            <div id="auth-area">
+                <h2>👤 Minha conta</h2>
+                <div class="abas-auth">
+                    <button class="aba-auth ativa" data-auth="login">Entrar</button>
+                    <button class="aba-auth" data-auth="cadastro">Cadastro</button>
+                </div>
+                <form id="form-login" class="form-auth">
+                    <input id="login-email" type="email" placeholder="E-mail" required>
+                    <input id="login-senha" type="password" placeholder="Senha" required minlength="6">
+                    <button type="submit">Entrar</button>
+                </form>
+                <form id="form-cadastro" class="form-auth" style="display:none">
+                    <input id="cadastro-nome" type="text" placeholder="Nome" required minlength="2">
+                    <input id="cadastro-email" type="email" placeholder="E-mail" required>
+                    <input id="cadastro-senha" type="password" placeholder="Senha (mínimo 6 caracteres)" required minlength="6">
+                    <button type="submit">Criar conta</button>
+                </form>
+                <p id="auth-erro" class="auth-erro"></p>
+            </div>
+            <div id="painel-usuario" style="display:none">
+                <h2>👤 Minha conta</h2>
+                <p id="usuario-nome"></p>
+                <div class="preferencia-bloco">
+                    <h3>🌍 Meus países</h3>
+                    <p>Salve países para acesso rápido.</p>
+                    <div id="paises-preferidos" class="chips"></div>
+                    <div class="linha-adicionar"><input id="novo-pais" placeholder="Ex.: Ukraine"><button id="adicionar-pais">Adicionar</button></div>
+                </div>
+                <div class="preferencia-bloco">
+                    <h3>🔔 Meus alertas</h3>
+                    <p>Crie alertas por país e categoria.</p>
+                    <div class="linha-adicionar">
+                        <input id="alerta-pais" placeholder="País">
+                        <select id="alerta-tipo"><option value="todos">Todas as categorias</option><option value="guerra">Guerra</option><option value="ataque">Ataque</option><option value="terrorismo">Terrorismo</option><option value="operacao_militar">Operação militar</option><option value="protesto">Protesto</option><option value="diplomacia">Diplomacia</option><option value="humanitario">Humanitário</option><option value="sancao">Sanções</option><option value="politica">Política</option></select>
+                        <button id="adicionar-alerta">Criar alerta</button>
+                    </div>
+                    <div id="lista-alertas"></div>
+                </div>
+                <div class="preferencia-bloco">
+                    <h3>⚙️ Meus filtros</h3>
+                    <select id="pref-periodo"><option value="todos">Todo o histórico</option><option value="hoje">Hoje</option><option value="24h">Últimas 24h</option><option value="7d">7 dias</option><option value="30d">30 dias</option></select>
+                    <select id="pref-tipo"><option value="todos">Todas as categorias</option><option value="guerra">Guerra</option><option value="ataque">Ataque</option><option value="terrorismo">Terrorismo</option><option value="operacao_militar">Operação militar</option><option value="protesto">Protesto</option><option value="diplomacia">Diplomacia</option><option value="humanitario">Humanitário</option><option value="sancao">Sanções</option><option value="politica">Política</option></select>
+                    <button id="salvar-filtros">Salvar filtros</button>
+                </div>
+                <button id="sair-conta" class="botao-sair">Sair da conta</button>
+                <p id="pref-status" class="auth-sucesso"></p>
             </div>
         </div>
     </div>
