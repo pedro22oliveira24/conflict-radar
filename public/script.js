@@ -8,6 +8,101 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 const markers = L.markerClusterGroup();
 map.addLayer(markers);
 
+// ─── TERRITÓRIOS GEOJSON ──────────────────────────────────────────────────────
+const TERRITORIOS = {
+  ukraine: {
+    cor: '#3b82f6',
+    nome: 'Ucrânia',
+    url: 'https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson',
+    codigo: 'UKR'
+  },
+  russia: {
+    cor: '#ef4444',
+    nome: 'Rússia',
+    codigo: 'RUS'
+  },
+  israel: {
+    cor: '#3b82f6',
+    nome: 'Israel',
+    codigo: 'ISR'
+  },
+  palestina: {
+    cor: '#fca5a5',
+    nome: 'Palestina',
+    codigo: 'PSE'
+  },
+  siria: {
+    cor: '#3b82f6',
+    nome: 'Síria',
+    codigo: 'SYR'
+  }
+};
+
+let geojsonLayers = {};
+let geojsonData = null;
+
+// Carrega o GeoJSON dos países
+async function carregarTerritorios() {
+  try {
+    const res = await fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson');
+    geojsonData = await res.json();
+    renderizarTerritorios();
+  } catch (err) {
+    console.error('Erro ao carregar territórios:', err);
+  }
+}
+
+function renderizarTerritorios() {
+  if (!geojsonData) return;
+
+  // Remove camadas existentes
+  Object.values(geojsonLayers).forEach(l => map.removeLayer(l));
+  geojsonLayers = {};
+
+  const mapa = {
+    'UKR': { cor: '#3b82f6', opacidade: 0.4 },
+    'RUS': { cor: '#ef4444', opacidade: 0.35 },
+    'ISR': { cor: '#3b82f6', opacidade: 0.4 },
+    'PSE': { cor: '#fca5a5', opacidade: 0.5 },
+    'SYR': { cor: '#3b82f6', opacidade: 0.4 },
+  };
+
+  geojsonData.features.forEach(feature => {
+    const codigo = feature.properties['ISO_A3'] || feature.properties['iso_a3'];
+    if (!codigo || !mapa[codigo]) return;
+
+    const estilo = mapa[codigo];
+    const layer = L.geoJSON(feature, {
+      style: {
+        fillColor: estilo.cor,
+        fillOpacity: estilo.opacidade,
+        color: estilo.cor,
+        weight: 2,
+        opacity: 0.8,
+      }
+    }).addTo(map);
+
+    geojsonLayers[codigo] = layer;
+  });
+
+  // Gaza — polígono manual (não tem no GeoJSON padrão)
+  const gaza = L.polygon([
+    [31.596, 34.267],
+    [31.596, 34.557],
+    [31.218, 34.557],
+    [31.218, 34.267],
+  ], {
+    fillColor: '#ef4444',
+    fillOpacity: 0.6,
+    color: '#ef4444',
+    weight: 2,
+  }).addTo(map);
+  geojsonLayers['GAZA'] = gaza;
+}
+
+carregarTerritorios();
+
+// ─── ÍCONES ───────────────────────────────────────────────────────────────────
 const ICONES = {
   guerra:      criarIcone('🔴'),
   ataque:      criarIcone('🟠'),
@@ -27,10 +122,12 @@ function criarIcone(emoji) {
   });
 }
 
+// ─── ESTADO ───────────────────────────────────────────────────────────────────
 let todosEventos = [];
 let filtroTipo   = 'todos';
 let filtroPais   = null;
 
+// ─── WEBSOCKET ────────────────────────────────────────────────────────────────
 const WS_URL = `ws://${location.host}`;
 let ws;
 
@@ -65,12 +162,14 @@ function conectarWS() {
 
 conectarWS();
 
+// ─── FILTROS ──────────────────────────────────────────────────────────────────
 function aplicarFiltro(tipo) {
   filtroTipo = tipo;
   filtroPais = null;
   document.getElementById('titulo-feed').textContent = '📰 Global Conflict News';
   abrirFeed();
   renderizar();
+  atualizarCoresTerritorios(tipo);
 }
 
 function filtrarPais(pais) {
@@ -82,6 +181,27 @@ function filtrarPais(pais) {
   renderizar();
 }
 
+// Muda a intensidade das cores dos territórios baseado no filtro
+function atualizarCoresTerritorios(tipo) {
+  const intensidade = {
+    'todos':       { fillOpacity: 0.4, opacity: 0.8 },
+    'guerra':      { fillOpacity: 0.7, opacity: 1.0 },
+    'ataque':      { fillOpacity: 0.6, opacity: 0.9 },
+    'protesto':    { fillOpacity: 0.3, opacity: 0.6 },
+    'diplomacia':  { fillOpacity: 0.2, opacity: 0.5 },
+    'humanitario': { fillOpacity: 0.2, opacity: 0.5 },
+    'sancao':      { fillOpacity: 0.3, opacity: 0.6 },
+  };
+
+  const estilo = intensidade[tipo] || intensidade['todos'];
+
+  Object.values(geojsonLayers).forEach(layer => {
+    if (layer.setStyle) {
+      layer.setStyle(estilo);
+    }
+  });
+}
+
 function centroPais(pais) {
   const centros = {
     Ukraine: [49, 32], Gaza: [31.5, 34.5], Israel: [31.5, 34.8],
@@ -91,6 +211,7 @@ function centroPais(pais) {
   return centros[pais] || [20, 10];
 }
 
+// ─── FILTRO DE EVENTOS ────────────────────────────────────────────────────────
 function eventosFiltrados() {
   return todosEventos.filter(e => {
     const passaTipo = filtroTipo === 'todos' || e.tipo === filtroTipo;
@@ -99,6 +220,7 @@ function eventosFiltrados() {
   });
 }
 
+// ─── RENDERIZAR ───────────────────────────────────────────────────────────────
 function renderizar() {
   const lista = eventosFiltrados();
   atualizarMapa(lista);
