@@ -310,11 +310,7 @@ function abrirFeed() {
   setTimeout(() => map.invalidateSize(), 400);
 }
 
-document.getElementById('fechar').onclick = () => {
-  document.getElementById('feed').classList.remove('aberta');
-  filtroPais = null;
-  setTimeout(() => map.invalidateSize(), 400);
-};
+
 
 document.getElementById('pesquisa').addEventListener('keyup', (e) => {
   const valor = e.target.value.toLowerCase();
@@ -338,6 +334,26 @@ function tipoLabel(tipo) {
   return labels[tipo] || '⚪ Outro';
 }
 
+
+
+// ─── CONTROLES DE INTERFACE ───────────────────────────────────────────────────
+function inicializarControlesInterface(){
+  const botaoFecharFeed=document.getElementById('fechar');
+  if(botaoFecharFeed){
+    botaoFecharFeed.addEventListener('click',()=>{
+      const feed=document.getElementById('feed');
+      if(feed) feed.classList.remove('aberta');
+      filtroPais=null;
+      if(typeof map!=='undefined' && map) setTimeout(()=>map.invalidateSize(),400);
+    });
+  }
+
+  const botaoConta=document.getElementById('botao-conta');
+  if(botaoConta) botaoConta.addEventListener('click',abrirUsuario);
+
+  const botaoFecharUsuario=document.getElementById('fechar-usuario');
+  if(botaoFecharUsuario) botaoFecharUsuario.addEventListener('click',fecharUsuario);
+}
 
 // ─── USUÁRIOS / LOGIN / PREFERÊNCIAS ─────────────────────────────────────────
 let sessao = null;
@@ -388,9 +404,8 @@ async function salvarPreferencias(mensagem='Preferências salvas!'){
 window.removerPais=async function(i){ preferencias.countries.splice(i,1); await salvarPreferencias('País removido.'); };
 window.removerAlerta=async function(i){ preferencias.alerts.splice(i,1); await salvarPreferencias('Alerta removido.'); };
 
-document.getElementById('botao-conta').onclick=abrirUsuario;
-document.getElementById('fechar-usuario').onclick=fecharUsuario;
-document.getElementById('modal-usuario').onclick=e=>{if(e.target===document.getElementById('modal-usuario'))fecharUsuario();};
+const modalUsuario=document.getElementById('modal-usuario');
+if(modalUsuario) modalUsuario.onclick=e=>{if(e.target===modalUsuario)fecharUsuario();};
 
 document.querySelectorAll('.aba-auth').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.aba-auth').forEach(x=>x.classList.remove('ativa'));b.classList.add('ativa');
@@ -427,6 +442,8 @@ document.getElementById('salvar-filtros').onclick=async()=>{
   await salvarPreferencias('Filtros salvos!');
 };
 document.getElementById('sair-conta').onclick=()=>{localStorage.removeItem('conflictRadarToken');sessao=null;preferencias={countries:[],alerts:[],filters:{}};document.getElementById('pref-status').textContent='';atualizarPainelUsuario();};
+
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', inicializarControlesInterface); else inicializarControlesInterface();
 
 (async function restaurarSessao(){
   if(!tokenAuth())return;
