@@ -35,9 +35,51 @@ body.modal-aberto { overflow: hidden; }
 
 .barra-paises button:hover { background: #334155; }
 
+.barra-territorios {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 6px 10px;
+    background: #07111f;
+    border-bottom: 1px solid #1e293b;
+    font-size: 13px;
+}
+
+.barra-territorios button {
+    background: #172033;
+    color: #e2e8f0;
+    border: 1px solid #334155;
+    border-radius: 7px;
+    padding: 6px 9px;
+    cursor: pointer;
+}
+
+.barra-territorios button:hover { background: #243047; }
+
+.territorio-chave {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: #dbeafe;
+}
+
+.chave, .legenda-cor {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    border: 1px solid rgba(15, 23, 42, .45);
+}
+
+.cor-azul, .cor-ucrania, .cor-israel, .cor-siria { background: #2563eb; }
+.cor-vermelho, .cor-russia { background: #ef4444; }
+.cor-rosa, .cor-palestina { background: #fca5a5; }
+.cor-gaza { background: #dc2626; }
+
 .container {
     display: flex;
-    height: calc(100vh - 140px);
+    height: calc(100vh - 190px);
     width: 100%;
     overflow: hidden;
 }
@@ -238,3 +280,29 @@ body.modal-aberto { overflow: hidden; }
     .modal-meta { grid-template-columns: 1fr; }
     .logo { font-size: 34px; }
 }
+
+
+.legenda-territorial {
+    background: rgba(255,255,255,.96);
+    color: #0f172a;
+    padding: 10px 12px;
+    border-radius: 8px;
+    box-shadow: 0 4px 18px rgba(15,23,42,.25);
+    font-size: 12px;
+    line-height: 1.75;
+    min-width: 130px;
+}
+
+.legenda-titulo {
+    font-weight: 700;
+    margin-bottom: 3px;
+}
+
+.legenda-territorial > div:not(.legenda-titulo) {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.popup-subtexto { color: #64748b; font-size: 12px; }
+.leaflet-container { background: #a9c4cf; }
