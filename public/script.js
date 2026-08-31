@@ -50,9 +50,10 @@ function initMap() {
         worldCopyJump: true
     }).setView([34, 34], 3);
 
-    // Base clara para deixar as cores territoriais parecidas com mapas de referência.
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
-        attribution: '© OpenStreetMap © CARTO',
+    // Base pública sem chave de API. Isso evita a marca "API KEY REQUIRED"
+    // que estava aparecendo repetidamente sobre o mapa.
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
         maxZoom: 19
     }).addTo(map);
 
