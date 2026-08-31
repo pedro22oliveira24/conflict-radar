@@ -1,472 +1,217 @@
-let map, markers, territoriosLayer, gazaLayer, ocupacaoUcraniaLayer, todosEventos = [], filtroAtual = 'todos', paisAtual = null;
+// ─── MAPA ─────────────────────────────────────────────────────────────────────
+const map = L.map('map').setView([20, 10], 2);
 
-const ESTILO_OCUPACAO_UCRANIA = {
-    color: '#7f1d1d',
-    fillColor: '#ef4444',
-    fillOpacity: 0.68,
-    weight: 1.5
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+const markers = L.markerClusterGroup();
+map.addLayer(markers);
+
+const ICONES = {
+  guerra:      criarIcone('🔴'),
+  ataque:      criarIcone('🟠'),
+  protesto:    criarIcone('🟡'),
+  diplomacia:  criarIcone('🔵'),
+  humanitario: criarIcone('🟢'),
+  sancao:      criarIcone('⚫'),
+  outro:       criarIcone('⚪'),
 };
 
-const ESTILO_TERRITORIOS = {
-    Ukraine:  { color: '#2563eb', fillColor: '#2563eb', fillOpacity: 0.58, weight: 2.5 },
-    Russia:   { color: '#dc2626', fillColor: '#ef4444', fillOpacity: 0.48, weight: 2.5 },
-    Israel:   { color: '#2563eb', fillColor: '#2563eb', fillOpacity: 0.62, weight: 2.5 },
-    Palestine:{ color: '#f87171', fillColor: '#fca5a5', fillOpacity: 0.58, weight: 2.5 },
-    Syria:    { color: '#2563eb', fillColor: '#2563eb', fillOpacity: 0.50, weight: 2.5 }
-};
-
-const NOMES_TERRITORIOS = {
-    Ukraine: 'Ucrânia',
-    Russia: 'Rússia',
-    Israel: 'Israel',
-    Palestine: 'Palestina',
-    Syria: 'Síria'
-};
-
-const ALIASES_TERRITORIAIS = {
-    'Russian Federation': 'Russia',
-    'Palestinian Territories': 'Palestine',
-    'West Bank': 'Palestine'
-};
-
-function escaparHTML(valor) {
-    return String(valor ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+function criarIcone(emoji) {
+  return L.divIcon({
+    html: `<div style="font-size:20px;line-height:1">${emoji}</div>`,
+    className: '',
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  });
 }
 
-function normalizarData(data) {
-    if (!data) return 'Data não informada';
-    const d = new Date(data);
-    return Number.isNaN(d.getTime()) ? String(data) : d.toLocaleString('pt-BR');
-}
+let todosEventos = [];
+let filtroTipo   = 'todos';
+let filtroPais   = null;
 
-function initMap() {
-    map = L.map('map', {
-        zoomControl: true,
-        worldCopyJump: true
-    }).setView([34, 34], 3);
-
-    // Base pública sem chave de API. Isso evita a marca "API KEY REQUIRED"
-    // que estava aparecendo repetidamente sobre o mapa.
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png?v=20260831', {
-        attribution: '© OpenStreetMap contributors',
-        maxZoom: 19,
-        // Força uma URL nova para evitar que o navegador reutilize tiles antigos.
-        updateWhenIdle: true
-    }).addTo(map);
-
-    markers = L.markerClusterGroup();
-    map.addLayer(markers);
-
-    adicionarLegendaTerritorial();
-    carregarTerritorios();
-}
-
-function nomeTerritorio(feature) {
-    const bruto = feature.properties?.name || feature.properties?.ADMIN || feature.properties?.NAME || '';
-    return ALIASES_TERRITORIAIS[bruto] || bruto;
-}
-
-function adicionarLegendaTerritorial() {
-    const legenda = L.control({ position: 'bottomleft' });
-    legenda.onAdd = () => {
-        const div = L.DomUtil.create('div', 'legenda-territorial');
-        div.innerHTML = `
-            <div class="legenda-titulo">Territórios</div>
-            <div><span class="legenda-cor cor-ucrania"></span>Ucrânia</div>
-            <div><span class="legenda-cor cor-russia"></span>Rússia</div>
-            <div><span class="legenda-cor cor-palestina"></span>Palestina</div>
-            <div><span class="legenda-cor cor-gaza"></span>Faixa de Gaza</div>
-            <div><span class="legenda-cor cor-israel"></span>Israel</div>
-            <div><span class="legenda-cor cor-siria"></span>Síria</div>
-        `;
-        L.DomEvent.disableClickPropagation(div);
-        return div;
-    };
-    legenda.addTo(map);
-}
-
-async function carregarTerritorios() {
-    try {
-        const resposta = await fetch('https://raw.githubusercontent.com/datasets/geo-countries/main/data/countries.geojson');
-        if (!resposta.ok) throw new Error('Não foi possível carregar os limites territoriais');
-
-        const geojson = await resposta.json();
-
-        territoriosLayer = L.geoJSON(geojson, {
-            filter: feature => Object.prototype.hasOwnProperty.call(ESTILO_TERRITORIOS, nomeTerritorio(feature)),
-            style: feature => ESTILO_TERRITORIOS[nomeTerritorio(feature)],
-            onEachFeature: (feature, layer) => {
-                const nome = nomeTerritorio(feature);
-                layer.bindPopup(
-                    '<strong>' + escaparHTML(NOMES_TERRITORIOS[nome] || nome) +
-                    '</strong><br><span class="popup-subtexto">Camada territorial</span>'
-                );
-            }
-        }).addTo(map);
-
-        // Gaza é desenhada separadamente para permanecer visualmente distinta da Palestina.
-        carregarGaza();
-
-        // Áreas sob ocupação russa são carregadas de uma fonte GeoJSON externa
-        // atualizada, em vez de serem desenhadas manualmente.
-        carregarOcupacaoUcrania();
-    } catch (erro) {
-        console.error('Erro ao carregar camada territorial:', erro);
-    }
-}
-
-async function carregarOcupacaoUcrania() {
-    try {
-        // Busca automaticamente o snapshot mais recente disponível no repositório.
-        const indice = await fetch(
-            'https://api.github.com/repos/cyterat/deepstate-map-data/contents/data'
-        );
-
-        if (!indice.ok) throw new Error('Não foi possível consultar a fonte territorial');
-
-        const arquivos = await indice.json();
-
-        const ultimoArquivo = arquivos
-            .filter(item => item.type === 'file' && /^deepstatemap_data_\\d{4}-\\d{2}-\\d{2}\\.geojson$/.test(item.name))
-            .sort((a, b) => b.name.localeCompare(a.name))[0];
-
-        if (!ultimoArquivo?.download_url) {
-            throw new Error('Nenhum snapshot territorial disponível');
-        }
-
-        const resposta = await fetch(ultimoArquivo.download_url);
-        if (!resposta.ok) throw new Error('Não foi possível carregar a ocupação territorial');
-
-        const geojson = await resposta.json();
-
-        ocupacaoUcraniaLayer = L.geoJSON(geojson, {
-            style: ESTILO_OCUPACAO_UCRANIA,
-            onEachFeature: (_, layer) => {
-                layer.bindPopup(
-                    '<strong>Área sob ocupação russa</strong><br>' +
-                    '<span class="popup-subtexto">Estimativa cartográfica de fonte aberta</span>'
-                );
-            }
-        }).addTo(map);
-
-        adicionarAvisoFonteTerritorial(ultimoArquivo.name);
-    } catch (erro) {
-        console.error('Erro ao carregar ocupação da Ucrânia:', erro);
-    }
-}
-
-function adicionarAvisoFonteTerritorial(nomeArquivo) {
-    const data = (nomeArquivo.match(/\\d{4}-\\d{2}-\\d{2}/) || ['snapshot'])[0];
-
-    const fonte = L.control({ position: 'bottomright' });
-    fonte.onAdd = () => {
-        const div = L.DomUtil.create('div', 'fonte-territorial');
-        div.innerHTML =
-            '<strong>Controle territorial da Ucrânia</strong><br>' +
-            'Fonte aberta: DeepState-derived GeoJSON<br>' +
-            '<span>Snapshot: ' + escaparHTML(data) + ' • pode haver atraso e incerteza cartográfica</span>';
-        L.DomEvent.disableClickPropagation(div);
-        return div;
-    };
-    fonte.addTo(map);
-}
-
-async function carregarGaza() {
-    try {
-        const resposta = await fetch('https://raw.githubusercontent.com/sepans/palestine_geodata/master/gaza.geo.json');
-        if (!resposta.ok) throw new Error('Não foi possível carregar a geometria de Gaza');
-
-        const geojson = await resposta.json();
-        gazaLayer = L.geoJSON(geojson, {
-            style: {
-                color: '#991b1b',
-                fillColor: '#dc2626',
-                fillOpacity: 0.72,
-                weight: 2.5
-            },
-            onEachFeature: (_, layer) => {
-                layer.bindPopup('<strong>Faixa de Gaza</strong><br><span class="popup-subtexto">Camada territorial</span>');
-            }
-        }).addTo(map);
-    } catch (erro) {
-        console.error('Erro ao carregar Gaza:', erro);
-    }
-}
-
-function alternarTerritorios() {
-    if (territoriosLayer) {
-        if (map.hasLayer(territoriosLayer)) map.removeLayer(territoriosLayer);
-        else map.addLayer(territoriosLayer);
-    }
-
-    if (gazaLayer) {
-        if (map.hasLayer(gazaLayer)) map.removeLayer(gazaLayer);
-        else map.addLayer(gazaLayer);
-    }
-
-    if (ocupacaoUcraniaLayer) {
-        if (map.hasLayer(ocupacaoUcraniaLayer)) map.removeLayer(ocupacaoUcraniaLayer);
-        else map.addLayer(ocupacaoUcraniaLayer);
-    }
-}
+const WS_URL = `ws://${location.host}`;
+let ws;
 
 function conectarWS() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}`);
-    const status = document.getElementById('status-conexao');
+  ws = new WebSocket(WS_URL);
 
-    ws.onopen = () => {
-        status.textContent = '⚡ Conectado';
-        status.className = 'status-conectado';
-    };
+  ws.onopen = () => {
+    document.getElementById('status-conexao').textContent = '🟢 Conectado — atualizando a cada 30s';
+    document.getElementById('status-conexao').className = 'status-conectado';
+  };
 
-    ws.onerror = () => {
-        status.textContent = '⚠️ Erro na conexão';
-        status.className = 'status-desconectado';
-    };
+  ws.onclose = () => {
+    document.getElementById('status-conexao').textContent = '🔴 Desconectado — reconectando...';
+    document.getElementById('status-conexao').className = 'status-desconectado';
+    setTimeout(conectarWS, 3000);
+  };
 
-    ws.onclose = () => {
-        status.textContent = '❌ Desconectado (tentando reconectar...)';
-        status.className = 'status-desconectado';
-        setTimeout(conectarWS, 3000);
-    };
+  ws.onerror = () => ws.close();
 
-    ws.onmessage = (event) => {
-        try {
-            const msg = JSON.parse(event.data);
-
-            if (msg.tipo === 'todos_eventos') {
-                todosEventos = Array.isArray(msg.dados) ? msg.dados : [];
-                atualizarInterface();
-            } else if (msg.tipo === 'novos_eventos') {
-                const novos = Array.isArray(msg.dados) ? msg.dados : [];
-                const ids = new Set(todosEventos.map(e => String(e.id)));
-                const unicos = novos.filter(e => !ids.has(String(e.id)));
-                todosEventos = [...unicos, ...todosEventos].slice(0, 500);
-                atualizarInterface();
-            }
-        } catch (erro) {
-            console.error('Mensagem WebSocket inválida:', erro);
-        }
-    };
-}
-
-function eventoCombinaPesquisa(e, pesquisa) {
-    const texto = [e.titulo, e.cidade, e.pais, e.fonte, e.tipo]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-    return !pesquisa || texto.includes(pesquisa);
-}
-
-function atualizarInterface() {
-    const pesquisa = document.getElementById('pesquisa').value.trim().toLowerCase();
-
-    const filtrados = todosEventos.filter(e => {
-        const matchTipo = filtroAtual === 'todos' || e.tipo === filtroAtual;
-        const matchPais = !paisAtual || e.pais === paisAtual;
-        return matchTipo && matchPais && eventoCombinaPesquisa(e, pesquisa);
-    });
-
-    atualizarMapa(filtrados);
-    atualizarFeed(filtrados);
-    atualizarEstatisticas(filtrados);
-    atualizarTimeline(filtrados);
-}
-
-function atualizarMapa(eventos) {
-    markers.clearLayers();
-
-    eventos.forEach(e => {
-        if (!Number.isFinite(Number(e.lat)) || !Number.isFinite(Number(e.lng))) return;
-
-        const marker = L.marker([Number(e.lat), Number(e.lng)]);
-        const titulo = escaparHTML(e.titulo || 'Evento sem título');
-        const cidade = escaparHTML(e.cidade || 'Local não informado');
-        const pais = escaparHTML(e.pais || 'País não informado');
-        const descricao = escaparHTML(e.descricao || 'Sem descrição.');
-        const tipo = escaparHTML(e.tipo || 'outro');
-
-        marker.bindPopup(`
-            <div class="popup-evento">
-                <strong>${titulo}</strong>
-                <div><i>${cidade}, ${pais}</i></div>
-                <div class="popup-tipo">${tipo}</div>
-                <p>${descricao.length > 140 ? `${descricao.substring(0, 140)}...` : descricao}</p>
-                <button class="popup-detalhes" onclick="verDetalhes(${JSON.stringify(String(e.id))})">
-                    Ver detalhes
-                </button>
-            </div>
-        `);
-
-        marker.on('click', () => {
-            // Mantém o popup como primeira interação; o botão abre o painel completo.
-        });
-
-        markers.addLayer(marker);
-    });
-}
-
-function atualizarFeed(eventos) {
-    const lista = document.getElementById('lista-noticias');
-    lista.innerHTML = '';
-
-    if (!eventos.length) {
-        lista.innerHTML = '<div class="sem-eventos">Nenhum evento encontrado com os filtros atuais.</div>';
-        return;
+  ws.onmessage = (msg) => {
+    const pacote = JSON.parse(msg.data);
+    if (pacote.tipo === 'todos_eventos') {
+      todosEventos = pacote.dados;
+      renderizar();
     }
-
-    eventos.slice(0, 20).forEach(e => {
-        const div = document.createElement('div');
-        div.className = 'noticia';
-        div.tabIndex = 0;
-        div.onclick = () => verDetalhes(e.id);
-        div.onkeydown = (event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                verDetalhes(e.id);
-            }
-        };
-
-        const imagem = e.imagem
-            ? `<img src="${escaparHTML(e.imagem)}" alt="Imagem da notícia" loading="lazy" onerror="this.style.display='none'">`
-            : '';
-
-        div.innerHTML = `
-            ${imagem}
-            <div class="noticia-tipo">${escaparHTML(e.tipo || 'outro')}</div>
-            <h3>${escaparHTML(e.titulo || 'Sem título')}</h3>
-            <p>${escaparHTML(e.cidade || 'Local não informado')}, ${escaparHTML(e.pais || 'País não informado')}</p>
-            <small>${escaparHTML(normalizarData(e.data))} · ${escaparHTML(e.fonte || 'Fonte não informada')}</small>
-            <div class="noticia-acao">Clique para ver detalhes →</div>
-        `;
-
-        lista.appendChild(div);
-    });
+    if (pacote.tipo === 'novos_eventos') {
+      todosEventos = [...pacote.dados, ...todosEventos].slice(0, 200);
+      renderizar();
+    }
+  };
 }
 
-function atualizarEstatisticas(eventos) {
-    const contagem = {
-        guerra: 0,
-        ataque: 0,
-        protesto: 0,
-        diplomacia: 0,
-        humanitario: 0,
-        sancao: 0
-    };
-
-    eventos.forEach(e => {
-        if (contagem[e.tipo] !== undefined) contagem[e.tipo]++;
-    });
-
-    document.getElementById('guerras').textContent = contagem.guerra;
-    document.getElementById('ataques').textContent = contagem.ataque;
-    document.getElementById('protestos').textContent = contagem.protesto;
-    document.getElementById('diplomacia').textContent = contagem.diplomacia;
-    document.getElementById('humanitario').textContent = contagem.humanitario;
-    document.getElementById('sancao').textContent = contagem.sancao;
-}
-
-function atualizarTimeline(eventos) {
-    const lista = document.getElementById('timeline-lista');
-    lista.innerHTML = '';
-
-    eventos.slice(0, 10).forEach(e => {
-        const div = document.createElement('div');
-        div.className = 'evento';
-        div.tabIndex = 0;
-        div.onclick = () => verDetalhes(e.id);
-        div.onkeydown = (event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                verDetalhes(e.id);
-            }
-        };
-
-        div.innerHTML = `
-            <b>${escaparHTML(e.titulo || 'Sem título')}</b>
-            <br>
-            <small>${escaparHTML(e.cidade || 'Local não informado')} · ${escaparHTML(normalizarData(e.data))}</small>
-        `;
-
-        lista.appendChild(div);
-    });
-}
+conectarWS();
 
 function aplicarFiltro(tipo) {
-    filtroAtual = tipo;
-    paisAtual = null;
-    atualizarInterface();
+  filtroTipo = tipo;
+  filtroPais = null;
+  document.getElementById('titulo-feed').textContent = '📰 Global Conflict News';
+  abrirFeed();
+  renderizar();
 }
 
 function filtrarPais(pais) {
-    paisAtual = pais;
-    filtroAtual = 'todos';
-    document.getElementById('feed').classList.add('aberta');
-    atualizarInterface();
+  filtroPais = pais;
+  filtroTipo = 'todos';
+  document.getElementById('titulo-feed').textContent = `📰 ${pais}`;
+  map.setView(centroPais(pais), 6);
+  abrirFeed();
+  renderizar();
 }
 
-function verDetalhes(id) {
-    const e = todosEventos.find(ev => String(ev.id) === String(id));
-    if (!e) return;
-
-    const modal = document.getElementById('modal');
-    const conteudo = document.getElementById('modal-conteudo');
-    const imagem = e.imagem
-        ? `<img class="modal-imagem" src="${escaparHTML(e.imagem)}" alt="Imagem da notícia" onerror="this.style.display='none'">`
-        : '';
-    const link = e.url
-        ? `<a class="modal-link" href="${escaparHTML(e.url)}" target="_blank" rel="noopener noreferrer">Ler notícia completa ↗</a>`
-        : '<div class="modal-sem-link">Link da notícia não disponível.</div>';
-
-    conteudo.innerHTML = `
-        ${imagem}
-        <div class="modal-badge">${escaparHTML(e.tipo || 'outro')}</div>
-        <h2>${escaparHTML(e.titulo || 'Evento sem título')}</h2>
-        <div class="modal-meta">
-            <div><strong>📍 Local</strong><br>${escaparHTML(e.cidade || 'Não informado')}, ${escaparHTML(e.pais || 'Não informado')}</div>
-            <div><strong>📰 Fonte</strong><br>${escaparHTML(e.fonte || 'Não informada')}</div>
-            <div><strong>🕒 Data</strong><br>${escaparHTML(normalizarData(e.data))}</div>
-        </div>
-        <div class="modal-descricao">
-            <strong>Descrição</strong>
-            <p>${escaparHTML(e.descricao || 'Não há descrição disponível para este evento.')}</p>
-        </div>
-        ${link}
-    `;
-
-    modal.style.display = 'flex';
-    document.body.classList.add('modal-aberto');
+function centroPais(pais) {
+  const centros = {
+    Ukraine: [49, 32], Gaza: [31.5, 34.5], Israel: [31.5, 34.8],
+    Syria: [34.8, 38.99], Iran: [32, 53], Myanmar: [21, 96],
+    Sudan: [15.55, 32.53], Yemen: [15.55, 48.5],
+  };
+  return centros[pais] || [20, 10];
 }
 
-function fecharModal() {
-    const modal = document.getElementById('modal');
-    modal.style.display = 'none';
-    document.body.classList.remove('modal-aberto');
+function eventosFiltrados() {
+  return todosEventos.filter(e => {
+    const passaTipo = filtroTipo === 'todos' || e.tipo === filtroTipo;
+    const passaPais = !filtroPais || e.pais === filtroPais;
+    return passaTipo && passaPais;
+  });
+}
+
+function renderizar() {
+  const lista = eventosFiltrados();
+  atualizarMapa(lista);
+  atualizarContadores(lista);
+  atualizarFeed(lista);
+  atualizarTimeline(lista);
+}
+
+function atualizarMapa(lista) {
+  markers.clearLayers();
+  lista.forEach(e => {
+    const m = L.marker([e.lat, e.lng], { icon: ICONES[e.tipo] || ICONES.outro });
+    m.bindPopup(`
+      <div style="max-width:260px">
+        <strong style="font-size:13px">${e.titulo}</strong><br>
+        <small style="color:#555">${e.fonte} · ${formatarData(e.data)}</small><br>
+        <span style="font-size:12px">📍 ${e.cidade} — ${tipoLabel(e.tipo)}</span><br><br>
+        <a href="${e.url}" target="_blank" style="color:#2563eb">Ler notícia →</a>
+      </div>
+    `);
+    markers.addLayer(m);
+  });
+}
+
+function atualizarContadores(lista) {
+  const contagem = { guerra:0, ataque:0, protesto:0, diplomacia:0, humanitario:0, sancao:0 };
+  lista.forEach(e => { if (contagem[e.tipo] !== undefined) contagem[e.tipo]++; });
+  Object.entries(contagem).forEach(([tipo, n]) => {
+    const el = document.getElementById(tipo);
+    if (el) el.textContent = n;
+  });
+}
+
+function atualizarFeed(lista) {
+  const container = document.getElementById('lista-noticias');
+  if (!lista.length) {
+    container.innerHTML = '<p style="color:#666;padding:10px">Nenhum evento encontrado.</p>';
+    return;
+  }
+  container.innerHTML = lista.slice(0, 30).map(e => `
+    <div class="noticia" onclick="abrirModal('${e.id.replace(/'/g,"\\'")}')">
+      ${e.imagem ? `<img src="${e.imagem}" onerror="this.style.display='none'">` : ''}
+      <div class="noticia-tipo ${e.tipo}">${tipoLabel(e.tipo)}</div>
+      <h3>${e.titulo}</h3>
+      <p>${e.fonte} — 📍 ${e.cidade} — ${formatarData(e.data)}</p>
+      <a href="${e.url}" target="_blank" onclick="event.stopPropagation()">Ler notícia →</a>
+    </div>
+  `).join('');
+}
+
+function atualizarTimeline(lista) {
+  const container = document.getElementById('timeline-lista');
+  if (!container) return;
+  container.innerHTML = lista.slice(0, 15).map(e => `
+    <div class="evento" onclick="abrirModal('${e.id.replace(/'/g,"\\'")}')">
+      <div style="font-size:11px;color:#888">${formatarData(e.data)} — ${e.fonte}</div>
+      <div style="font-size:13px;margin-top:4px">${tipoLabel(e.tipo)} ${e.cidade} — ${e.titulo}</div>
+    </div>
+  `).join('');
+}
+
+function abrirModal(id) {
+  const e = todosEventos.find(ev => ev.id === id);
+  if (!e) return;
+  document.getElementById('modal-conteudo').innerHTML = `
+    ${e.imagem ? `<img src="${e.imagem}" style="width:100%;border-radius:10px;margin-bottom:12px" onerror="this.style.display='none'">` : ''}
+    <div class="noticia-tipo ${e.tipo}" style="margin-bottom:10px">${tipoLabel(e.tipo)}</div>
+    <h2 style="margin:0 0 8px;font-size:18px;color:#111">${e.titulo}</h2>
+    <p style="color:#555;font-size:13px;margin:0 0 6px">📍 ${e.cidade}, ${e.pais}</p>
+    <p style="color:#555;font-size:13px;margin:0 0 12px">📅 ${formatarData(e.data)} — ${e.fonte}</p>
+    ${e.descricao ? `<p style="color:#333;font-size:14px;line-height:1.6;margin-bottom:14px">${e.descricao}</p>` : ''}
+    <a href="${e.url}" target="_blank" style="color:#2563eb;font-size:14px">🔗 Ler notícia original →</a>
+  `;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+document.getElementById('fechar-modal').onclick = () => {
+  document.getElementById('modal').style.display = 'none';
+};
+document.getElementById('modal').onclick = (e) => {
+  if (e.target === document.getElementById('modal'))
+    document.getElementById('modal').style.display = 'none';
+};
+
+function abrirFeed() {
+  document.getElementById('feed').classList.add('aberta');
+  setTimeout(() => map.invalidateSize(), 400);
 }
 
 document.getElementById('fechar').onclick = () => {
-    document.getElementById('feed').classList.remove('aberta');
+  document.getElementById('feed').classList.remove('aberta');
+  filtroPais = null;
+  setTimeout(() => map.invalidateSize(), 400);
 };
 
-document.getElementById('fechar-modal').onclick = fecharModal;
-
-document.getElementById('modal').addEventListener('click', (event) => {
-    if (event.target.id === 'modal') fecharModal();
+document.getElementById('pesquisa').addEventListener('keyup', (e) => {
+  const valor = e.target.value.toLowerCase();
+  const botoes = document.querySelectorAll('.grupo-esquerda > button, .filtros > button');
+  botoes.forEach(b => {
+    b.style.display = b.innerText.toLowerCase().includes(valor) ? 'inline-block' : 'none';
+  });
 });
 
-document.getElementById('pesquisa').oninput = atualizarInterface;
+function formatarData(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
 
-document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') fecharModal();
-});
-
-window.onload = () => {
-    initMap();
-    conectarWS();
-};
+function tipoLabel(tipo) {
+  const labels = {
+    guerra: '🔴 Guerra', ataque: '🟠 Ataque', protesto: '🟡 Protesto',
+    diplomacia: '🔵 Diplomacia', humanitario: '🟢 Humanitário', sancao: '⚫ Sanção', outro: '⚪ Outro'
+  };
+  return labels[tipo] || '⚪ Outro';
+}
