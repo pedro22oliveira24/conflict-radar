@@ -333,8 +333,24 @@ body.modal-aberto { overflow: hidden; }
 .topo { display:flex; align-items:center; justify-content:space-between; gap:20px; }
 .acoes-conta { display:flex; align-items:center; gap:10px; }
 .botao-conta { background:#2563eb; color:#fff; border:0; border-radius:10px; padding:11px 16px; cursor:pointer; font-weight:bold; }
-.botao-cadastro { background:#16a34a; color:#fff; border:0; border-radius:10px; padding:11px 16px; cursor:pointer; font-weight:bold; }
-.botao-cadastro:hover { background:#15803d; }
+.botao-cadastro {
+  background:linear-gradient(135deg,#f97316,#ea580c);
+  color:#fff;
+  border:1px solid #fb923c;
+  border-radius:10px;
+  padding:11px 18px;
+  cursor:pointer;
+  font-weight:800;
+  box-shadow:0 4px 14px rgba(249,115,22,.35);
+  transition:transform .15s ease, box-shadow .15s ease, background .15s ease;
+}
+.botao-cadastro:hover {
+  background:linear-gradient(135deg,#fb923c,#f97316);
+  transform:translateY(-1px);
+  box-shadow:0 6px 18px rgba(249,115,22,.45);
+}
+.botao-cadastro:active { transform:translateY(0); }
+.botao-cadastro:focus-visible { outline:3px solid rgba(251,146,60,.45); outline-offset:2px; }
 .botao-conta:hover { background:#1d4ed8; }
 .modal-usuario { max-width:560px; }
 .abas-auth { display:flex; gap:8px; margin:15px 0; }
