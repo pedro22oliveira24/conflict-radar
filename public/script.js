@@ -128,10 +128,12 @@ let filtroTipo   = 'todos';
 let filtroPais   = null;
 
 // ─── WEBSOCKET ────────────────────────────────────────────────────────────────
-const WS_URL = `ws://${location.host}`;
+const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
 let ws;
 
+let reconnectTimer = null;
 function conectarWS() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
@@ -142,7 +144,7 @@ function conectarWS() {
   ws.onclose = () => {
     document.getElementById('status-conexao').textContent = '🔴 Desconectado — reconectando...';
     document.getElementById('status-conexao').className = 'status-desconectado';
-    setTimeout(conectarWS, 3000);
+    reconnectTimer = setTimeout(conectarWS, 3000);
   };
 
   ws.onerror = () => ws.close();
