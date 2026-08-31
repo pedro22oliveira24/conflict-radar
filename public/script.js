@@ -1,4 +1,11 @@
-let map, markers, territoriosLayer, gazaLayer, todosEventos = [], filtroAtual = 'todos', paisAtual = null;
+let map, markers, territoriosLayer, gazaLayer, ocupacaoUcraniaLayer, todosEventos = [], filtroAtual = 'todos', paisAtual = null;
+
+const ESTILO_OCUPACAO_UCRANIA = {
+    color: '#7f1d1d',
+    fillColor: '#ef4444',
+    fillOpacity: 0.68,
+    weight: 1.5
+};
 
 const ESTILO_TERRITORIOS = {
     Ukraine:  { color: '#2563eb', fillColor: '#2563eb', fillOpacity: 0.58, weight: 2.5 },
@@ -101,9 +108,69 @@ async function carregarTerritorios() {
 
         // Gaza é desenhada separadamente para permanecer visualmente distinta da Palestina.
         carregarGaza();
+
+        // Áreas sob ocupação russa são carregadas de uma fonte GeoJSON externa
+        // atualizada, em vez de serem desenhadas manualmente.
+        carregarOcupacaoUcrania();
     } catch (erro) {
         console.error('Erro ao carregar camada territorial:', erro);
     }
+}
+
+async function carregarOcupacaoUcrania() {
+    try {
+        // Busca automaticamente o snapshot mais recente disponível no repositório.
+        const indice = await fetch(
+            'https://api.github.com/repos/cyterat/deepstate-map-data/contents/data'
+        );
+
+        if (!indice.ok) throw new Error('Não foi possível consultar a fonte territorial');
+
+        const arquivos = await indice.json();
+
+        const ultimoArquivo = arquivos
+            .filter(item => item.type === 'file' && /^deepstatemap_data_\\d{4}-\\d{2}-\\d{2}\\.geojson$/.test(item.name))
+            .sort((a, b) => b.name.localeCompare(a.name))[0];
+
+        if (!ultimoArquivo?.download_url) {
+            throw new Error('Nenhum snapshot territorial disponível');
+        }
+
+        const resposta = await fetch(ultimoArquivo.download_url);
+        if (!resposta.ok) throw new Error('Não foi possível carregar a ocupação territorial');
+
+        const geojson = await resposta.json();
+
+        ocupacaoUcraniaLayer = L.geoJSON(geojson, {
+            style: ESTILO_OCUPACAO_UCRANIA,
+            onEachFeature: (_, layer) => {
+                layer.bindPopup(
+                    '<strong>Área sob ocupação russa</strong><br>' +
+                    '<span class="popup-subtexto">Estimativa cartográfica de fonte aberta</span>'
+                );
+            }
+        }).addTo(map);
+
+        adicionarAvisoFonteTerritorial(ultimoArquivo.name);
+    } catch (erro) {
+        console.error('Erro ao carregar ocupação da Ucrânia:', erro);
+    }
+}
+
+function adicionarAvisoFonteTerritorial(nomeArquivo) {
+    const data = (nomeArquivo.match(/\\d{4}-\\d{2}-\\d{2}/) || ['snapshot'])[0];
+
+    const fonte = L.control({ position: 'bottomright' });
+    fonte.onAdd = () => {
+        const div = L.DomUtil.create('div', 'fonte-territorial');
+        div.innerHTML =
+            '<strong>Controle territorial da Ucrânia</strong><br>' +
+            'Fonte aberta: DeepState-derived GeoJSON<br>' +
+            '<span>Snapshot: ' + escaparHTML(data) + ' • pode haver atraso e incerteza cartográfica</span>';
+        L.DomEvent.disableClickPropagation(div);
+        return div;
+    };
+    fonte.addTo(map);
 }
 
 async function carregarGaza() {
@@ -137,6 +204,11 @@ function alternarTerritorios() {
     if (gazaLayer) {
         if (map.hasLayer(gazaLayer)) map.removeLayer(gazaLayer);
         else map.addLayer(gazaLayer);
+    }
+
+    if (ocupacaoUcraniaLayer) {
+        if (map.hasLayer(ocupacaoUcraniaLayer)) map.removeLayer(ocupacaoUcraniaLayer);
+        else map.addLayer(ocupacaoUcraniaLayer);
     }
 }
 
