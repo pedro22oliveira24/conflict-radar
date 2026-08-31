@@ -337,3 +337,101 @@ function tipoLabel(tipo) {
   };
   return labels[tipo] || '⚪ Outro';
 }
+
+
+// ─── USUÁRIOS / LOGIN / PREFERÊNCIAS ─────────────────────────────────────────
+let sessao = null;
+let preferencias = { countries: [], alerts: [], filters: {} };
+
+function tokenAuth(){ return localStorage.getItem('conflictRadarToken'); }
+async function apiUsuario(url, options={}){
+  const headers = { 'Content-Type':'application/json', ...(options.headers||{}) };
+  const token = tokenAuth();
+  if(token) headers.Authorization = 'Bearer ' + token;
+  const r = await fetch(url, {...options, headers});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.erro || 'Não foi possível concluir a operação.');
+  return data;
+}
+function abrirUsuario(){
+  document.getElementById('modal-usuario').style.display='flex';
+  atualizarPainelUsuario();
+}
+function fecharUsuario(){ document.getElementById('modal-usuario').style.display='none'; }
+function atualizarPainelUsuario(){
+  const logado=!!sessao;
+  document.getElementById('auth-area').style.display=logado?'none':'block';
+  document.getElementById('painel-usuario').style.display=logado?'block':'none';
+  document.getElementById('botao-conta').textContent=logado ? '👤 '+sessao.nome : '👤 Entrar';
+  if(logado){
+    document.getElementById('usuario-nome').textContent='Olá, '+sessao.nome+' 👋';
+    renderizarPreferencias();
+  }
+}
+function renderizarPreferencias(){
+  const paises=document.getElementById('paises-preferidos');
+  paises.innerHTML=(preferencias.countries||[]).map((p,i)=>'<span class="chip">'+escHTML(p)+' <button onclick="removerPais('+i+')">×</button></span>').join('') || '<span style="color:#64748b;font-size:13px">Nenhum país salvo.</span>';
+  const alertas=document.getElementById('lista-alertas');
+  alertas.innerHTML=(preferencias.alerts||[]).map((a,i)=>'<div class="alerta-item"><span>🔔 '+escHTML(a.country||'Todos')+' — '+escHTML(tipoLabel(a.type||'todos'))+'</span><button onclick="removerAlerta('+i+')">Remover</button></div>').join('') || '<span style="color:#64748b;font-size:13px">Nenhum alerta criado.</span>';
+  document.getElementById('pref-periodo').value=preferencias.filters?.periodo||'todos';
+  document.getElementById('pref-tipo').value=preferencias.filters?.tipo||'todos';
+}
+function escHTML(v){ const d=document.createElement('div');d.textContent=String(v??'');return d.innerHTML; }
+async function salvarPreferencias(mensagem='Preferências salvas!'){
+  if(!sessao) return;
+  try{
+    preferencias=await apiUsuario('/api/preferences',{method:'PUT',body:JSON.stringify(preferencias)});
+    document.getElementById('pref-status').textContent=mensagem;
+    renderizarPreferencias();
+  }catch(e){ document.getElementById('pref-status').textContent=e.message; }
+}
+window.removerPais=async function(i){ preferencias.countries.splice(i,1); await salvarPreferencias('País removido.'); };
+window.removerAlerta=async function(i){ preferencias.alerts.splice(i,1); await salvarPreferencias('Alerta removido.'); };
+
+document.getElementById('botao-conta').onclick=abrirUsuario;
+document.getElementById('fechar-usuario').onclick=fecharUsuario;
+document.getElementById('modal-usuario').onclick=e=>{if(e.target===document.getElementById('modal-usuario'))fecharUsuario();};
+
+document.querySelectorAll('.aba-auth').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.aba-auth').forEach(x=>x.classList.remove('ativa'));b.classList.add('ativa');
+  const cadastro=b.dataset.auth==='cadastro';
+  document.getElementById('form-login').style.display=cadastro?'none':'flex';
+  document.getElementById('form-cadastro').style.display=cadastro?'flex':'none';
+  document.getElementById('auth-erro').textContent='';
+});
+document.getElementById('form-login').onsubmit=async e=>{
+  e.preventDefault(); const erro=document.getElementById('auth-erro');erro.textContent='';
+  try{
+    const d=await apiUsuario('/api/auth/login',{method:'POST',body:JSON.stringify({email:document.getElementById('login-email').value,senha:document.getElementById('login-senha').value})});
+    localStorage.setItem('conflictRadarToken',d.token);sessao=d.user;preferencias=await apiUsuario('/api/preferences');atualizarPainelUsuario();
+  }catch(x){erro.textContent=x.message;}
+};
+document.getElementById('form-cadastro').onsubmit=async e=>{
+  e.preventDefault(); const erro=document.getElementById('auth-erro');erro.textContent='';
+  try{
+    const d=await apiUsuario('/api/auth/register',{method:'POST',body:JSON.stringify({nome:document.getElementById('cadastro-nome').value,email:document.getElementById('cadastro-email').value,senha:document.getElementById('cadastro-senha').value})});
+    localStorage.setItem('conflictRadarToken',d.token);sessao=d.user;preferencias={countries:[],alerts:[],filters:{}};atualizarPainelUsuario();
+  }catch(x){erro.textContent=x.message;}
+};
+document.getElementById('adicionar-pais').onclick=async()=>{
+  const el=document.getElementById('novo-pais');const p=el.value.trim();if(!p)return;
+  if(!preferencias.countries.includes(p))preferencias.countries.push(p);el.value='';await salvarPreferencias('País salvo!');
+};
+document.getElementById('adicionar-alerta').onclick=async()=>{
+  const country=document.getElementById('alerta-pais').value.trim()||'Todos';
+  const type=document.getElementById('alerta-tipo').value;
+  preferencias.alerts.push({country,type});document.getElementById('alerta-pais').value='';await salvarPreferencias('Alerta criado!');
+};
+document.getElementById('salvar-filtros').onclick=async()=>{
+  preferencias.filters={periodo:document.getElementById('pref-periodo').value,tipo:document.getElementById('pref-tipo').value};
+  await salvarPreferencias('Filtros salvos!');
+};
+document.getElementById('sair-conta').onclick=()=>{localStorage.removeItem('conflictRadarToken');sessao=null;preferencias={countries:[],alerts:[],filters:{}};document.getElementById('pref-status').textContent='';atualizarPainelUsuario();};
+
+(async function restaurarSessao(){
+  if(!tokenAuth())return;
+  try{
+    const d=await apiUsuario('/api/auth/me');sessao=d.user;preferencias=await apiUsuario('/api/preferences');
+  }catch(e){localStorage.removeItem('conflictRadarToken');sessao=null;}
+  atualizarPainelUsuario();
+})();
