@@ -100,7 +100,46 @@ async function lerFeeds(){
 function broadcast(m){const t=JSON.stringify(m);wss.clients.forEach(c=>{if(c.readyState===1)c.send(t);});}
 wss.on('connection',ws=>{ws.send(JSON.stringify({tipo:'todos_eventos',dados:eventos}));});
 app.get('/api/eventos',(req,res)=>res.json(eventos));
-app.get('/api/historico',async(req,res)=>{if(!pool)return res.status(503).json({erro:'PostgreSQL não configurado.'});try{const limite=Math.min(Math.max(Number(req.query.limit)||200,1),1000);const r=await pool.query(`SELECT id,titulo,descricao,fonte,url,imagem,data,tipo,pais,cidade,lat,lng FROM events ORDER BY COALESCE(data,created_at) DESC LIMIT $1`,[limite]);res.json(r.rows);}catch(e){res.status(500).json({erro:'Não foi possível consultar o histórico.'});}});
+app.get('/api/historico',async(req,res)=>{
+  if(!pool)return res.status(503).json({erro:'PostgreSQL não configurado.'});
+  try{
+    const limite=Math.min(Math.max(Number(req.query.limit)||200,1),1000);
+    const periodo=(req.query.periodo||'todos').toLowerCase();
+    const pais=(req.query.pais||'').trim();
+    const tipo=(req.query.tipo||'').trim();
+
+    const condicoes=[];
+    const valores=[];
+    let i=1;
+
+    if(periodo==='hoje'){
+      condicoes.push(`COALESCE(data,created_at) >= date_trunc('day', NOW())`);
+    } else if(periodo==='24h'){
+      condicoes.push(`COALESCE(data,created_at) >= NOW() - INTERVAL '24 hours'`);
+    } else if(periodo==='7d'){
+      condicoes.push(`COALESCE(data,created_at) >= NOW() - INTERVAL '7 days'`);
+    } else if(periodo==='30d'){
+      condicoes.push(`COALESCE(data,created_at) >= NOW() - INTERVAL '30 days'`);
+    }
+
+    if(pais){condicoes.push(`pais = ${i++}`);valores.push(pais);}
+    if(tipo){condicoes.push(`tipo = ${i++}`);valores.push(tipo);}
+
+    const where=condicoes.length?'WHERE '+condicoes.join(' AND '):'';
+    valores.push(limite);
+
+    const sql=`SELECT id,titulo,descricao,fonte,url,imagem,data,tipo,pais,cidade,lat,lng
+      FROM events ${where}
+      ORDER BY COALESCE(data,created_at) DESC
+      LIMIT ${i}`;
+
+    const r=await pool.query(sql,valores);
+    res.json({filtros:{periodo,pais:pais||null,tipo:tipo||null},total:r.rows.length,eventos:r.rows});
+  }catch(e){
+    console.error('Erro ao consultar histórico filtrado:',e.message);
+    res.status(500).json({erro:'Não foi possível consultar o histórico.'});
+  }
+});
 app.get('/health',async(req,res)=>{if(!pool)return res.status(503).json({status:'erro',banco:'não configurado'});try{await pool.query('SELECT 1');res.json({status:'ok',banco:'conectado',eventos_em_memoria:eventos.length});}catch(e){res.status(503).json({status:'erro',banco:'desconectado'});}});
 const PORTA=process.env.PORT||3000;
 async function iniciar(){console.log('Iniciando Conflict Radar...');if(await testarBanco()){try{await prepararBanco();await carregarHistorico();}catch(e){console.error('Erro ao preparar/carregar PostgreSQL:',e.message);}}else console.log('PostgreSQL indisponível no momento.');server.listen(PORTA,()=>{console.log(`Conflict Radar rodando na porta ${PORTA}`);lerFeeds();setInterval(lerFeeds,30000);});}
