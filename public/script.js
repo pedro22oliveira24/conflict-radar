@@ -52,9 +52,11 @@ function initMap() {
 
     // Base pública sem chave de API. Isso evita a marca "API KEY REQUIRED"
     // que estava aparecendo repetidamente sobre o mapa.
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png?v=20260831', {
         attribution: '© OpenStreetMap contributors',
-        maxZoom: 19
+        maxZoom: 19,
+        // Força uma URL nova para evitar que o navegador reutilize tiles antigos.
+        updateWhenIdle: true
     }).addTo(map);
 
     markers = L.markerClusterGroup();
