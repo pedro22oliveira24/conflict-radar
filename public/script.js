@@ -1,4 +1,5 @@
-let map, markers, todosEventos = [], filtroAtual = 'todos', paisAtual = null;
+let map, markers, territoriosLayer, todosEventos = [], filtroAtual = 'todos', paisAtual = null;
+const CORES_TERRITORIAIS = { Ukraine: '#2563eb', Russia: '#dc2626', Israel: '#2563eb', Palestine: '#fca5a5', Syria: '#2563eb' };
 
 function escaparHTML(valor) {
     return String(valor ?? '')
@@ -24,6 +25,38 @@ function initMap() {
 
     markers = L.markerClusterGroup();
     map.addLayer(markers);
+    carregarTerritorios();
+}
+
+
+async function carregarTerritorios() {
+    try {
+        const resposta = await fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson');
+        if (!resposta.ok) throw new Error('Não foi possível carregar os limites territoriais');
+        const geojson = await resposta.json();
+        territoriosLayer = L.geoJSON(geojson, {
+            filter: feature => {
+                const nome = feature.properties?.ADMIN || feature.properties?.name || '';
+                return Object.prototype.hasOwnProperty.call(CORES_TERRITORIAIS, nome);
+            },
+            style: feature => {
+                const nome = feature.properties?.ADMIN || feature.properties?.name || '';
+                return { color: CORES_TERRITORIAIS[nome], fillColor: CORES_TERRITORIAIS[nome], weight: 2, fillOpacity: 0.38 };
+            },
+            onEachFeature: (feature, layer) => {
+                const nome = feature.properties?.ADMIN || feature.properties?.name || 'Território';
+                layer.bindPopup('<strong>' + escaparHTML(nome) + '</strong><br>Camada territorial do Conflict Radar');
+            }
+        }).addTo(map);
+    } catch (erro) {
+        console.error('Erro ao carregar camada territorial:', erro);
+    }
+}
+
+function alternarTerritorios() {
+    if (!territoriosLayer) return;
+    if (map.hasLayer(territoriosLayer)) map.removeLayer(territoriosLayer);
+    else map.addLayer(territoriosLayer);
 }
 
 function conectarWS() {
