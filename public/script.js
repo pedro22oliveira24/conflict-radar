@@ -1,5 +1,26 @@
-let map, markers, territoriosLayer, todosEventos = [], filtroAtual = 'todos', paisAtual = null;
-const CORES_TERRITORIAIS = { Ukraine: '#2563eb', Russia: '#dc2626', Israel: '#2563eb', Palestine: '#fca5a5', Syria: '#2563eb' };
+let map, markers, territoriosLayer, gazaLayer, todosEventos = [], filtroAtual = 'todos', paisAtual = null;
+
+const ESTILO_TERRITORIOS = {
+    Ukraine:  { color: '#2563eb', fillColor: '#2563eb', fillOpacity: 0.58, weight: 2.5 },
+    Russia:   { color: '#dc2626', fillColor: '#ef4444', fillOpacity: 0.48, weight: 2.5 },
+    Israel:   { color: '#2563eb', fillColor: '#2563eb', fillOpacity: 0.62, weight: 2.5 },
+    Palestine:{ color: '#f87171', fillColor: '#fca5a5', fillOpacity: 0.58, weight: 2.5 },
+    Syria:    { color: '#2563eb', fillColor: '#2563eb', fillOpacity: 0.50, weight: 2.5 }
+};
+
+const NOMES_TERRITORIOS = {
+    Ukraine: 'Ucrânia',
+    Russia: 'Rússia',
+    Israel: 'Israel',
+    Palestine: 'Palestina',
+    Syria: 'Síria'
+};
+
+const ALIASES_TERRITORIAIS = {
+    'Russian Federation': 'Russia',
+    'Palestinian Territories': 'Palestine',
+    'West Bank': 'Palestine'
+};
 
 function escaparHTML(valor) {
     return String(valor ?? '')
@@ -17,46 +38,106 @@ function normalizarData(data) {
 }
 
 function initMap() {
-    map = L.map('map').setView([20, 0], 2);
+    map = L.map('map', {
+        zoomControl: true,
+        worldCopyJump: true
+    }).setView([34, 34], 3);
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
+    // Base clara para deixar as cores territoriais parecidas com mapas de referência.
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+        attribution: '© OpenStreetMap © CARTO',
+        maxZoom: 19
     }).addTo(map);
 
     markers = L.markerClusterGroup();
     map.addLayer(markers);
+
+    adicionarLegendaTerritorial();
     carregarTerritorios();
 }
 
+function nomeTerritorio(feature) {
+    const bruto = feature.properties?.name || feature.properties?.ADMIN || feature.properties?.NAME || '';
+    return ALIASES_TERRITORIAIS[bruto] || bruto;
+}
+
+function adicionarLegendaTerritorial() {
+    const legenda = L.control({ position: 'bottomleft' });
+    legenda.onAdd = () => {
+        const div = L.DomUtil.create('div', 'legenda-territorial');
+        div.innerHTML = `
+            <div class="legenda-titulo">Territórios</div>
+            <div><span class="legenda-cor cor-ucrania"></span>Ucrânia</div>
+            <div><span class="legenda-cor cor-russia"></span>Rússia</div>
+            <div><span class="legenda-cor cor-palestina"></span>Palestina</div>
+            <div><span class="legenda-cor cor-gaza"></span>Faixa de Gaza</div>
+            <div><span class="legenda-cor cor-israel"></span>Israel</div>
+            <div><span class="legenda-cor cor-siria"></span>Síria</div>
+        `;
+        L.DomEvent.disableClickPropagation(div);
+        return div;
+    };
+    legenda.addTo(map);
+}
 
 async function carregarTerritorios() {
     try {
-        const resposta = await fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson');
+        const resposta = await fetch('https://raw.githubusercontent.com/datasets/geo-countries/main/data/countries.geojson');
         if (!resposta.ok) throw new Error('Não foi possível carregar os limites territoriais');
+
         const geojson = await resposta.json();
+
         territoriosLayer = L.geoJSON(geojson, {
-            filter: feature => {
-                const nome = feature.properties?.ADMIN || feature.properties?.name || '';
-                return Object.prototype.hasOwnProperty.call(CORES_TERRITORIAIS, nome);
-            },
-            style: feature => {
-                const nome = feature.properties?.ADMIN || feature.properties?.name || '';
-                return { color: CORES_TERRITORIAIS[nome], fillColor: CORES_TERRITORIAIS[nome], weight: 2, fillOpacity: 0.38 };
-            },
+            filter: feature => Object.prototype.hasOwnProperty.call(ESTILO_TERRITORIOS, nomeTerritorio(feature)),
+            style: feature => ESTILO_TERRITORIOS[nomeTerritorio(feature)],
             onEachFeature: (feature, layer) => {
-                const nome = feature.properties?.ADMIN || feature.properties?.name || 'Território';
-                layer.bindPopup('<strong>' + escaparHTML(nome) + '</strong><br>Camada territorial do Conflict Radar');
+                const nome = nomeTerritorio(feature);
+                layer.bindPopup(
+                    '<strong>' + escaparHTML(NOMES_TERRITORIOS[nome] || nome) +
+                    '</strong><br><span class="popup-subtexto">Camada territorial</span>'
+                );
             }
         }).addTo(map);
+
+        // Gaza é desenhada separadamente para permanecer visualmente distinta da Palestina.
+        carregarGaza();
     } catch (erro) {
         console.error('Erro ao carregar camada territorial:', erro);
     }
 }
 
+async function carregarGaza() {
+    try {
+        const resposta = await fetch('https://raw.githubusercontent.com/sepans/palestine_geodata/master/gaza.geo.json');
+        if (!resposta.ok) throw new Error('Não foi possível carregar a geometria de Gaza');
+
+        const geojson = await resposta.json();
+        gazaLayer = L.geoJSON(geojson, {
+            style: {
+                color: '#991b1b',
+                fillColor: '#dc2626',
+                fillOpacity: 0.72,
+                weight: 2.5
+            },
+            onEachFeature: (_, layer) => {
+                layer.bindPopup('<strong>Faixa de Gaza</strong><br><span class="popup-subtexto">Camada territorial</span>');
+            }
+        }).addTo(map);
+    } catch (erro) {
+        console.error('Erro ao carregar Gaza:', erro);
+    }
+}
+
 function alternarTerritorios() {
-    if (!territoriosLayer) return;
-    if (map.hasLayer(territoriosLayer)) map.removeLayer(territoriosLayer);
-    else map.addLayer(territoriosLayer);
+    if (territoriosLayer) {
+        if (map.hasLayer(territoriosLayer)) map.removeLayer(territoriosLayer);
+        else map.addLayer(territoriosLayer);
+    }
+
+    if (gazaLayer) {
+        if (map.hasLayer(gazaLayer)) map.removeLayer(gazaLayer);
+        else map.addLayer(gazaLayer);
+    }
 }
 
 function conectarWS() {
