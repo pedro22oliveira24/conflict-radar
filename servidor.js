@@ -64,13 +64,23 @@ function detectarCidade(texto){
   return null;
 }
 function classificar(texto){
-  const t=(texto||'').toLowerCase();
-  if(/war|battle|troops|invasion|offensive|ceasefire|military|army|combat/.test(t)) return 'guerra';
-  if(/attack|strike|airstrike|drone|missile|bomb|explosion|killed|casualties/.test(t)) return 'ataque';
-  if(/protest|riot|demonstration|march|rally|unrest/.test(t)) return 'protesto';
-  if(/diplomacy|talks|negotiations|summit|peace|treaty|agreement/.test(t)) return 'diplomacia';
-  if(/humanitarian|aid|refugees|evacuate|civilian/.test(t)) return 'humanitario';
-  if(/sanction|ban|embargo|freeze/.test(t)) return 'sancao';
+  const t = (texto || '').toLowerCase();
+
+  const regras = [
+    ['terrorismo', /terroris[mt]|terrorist|terror attack|suicide bombing|claimed responsibility|extremist attack|isis|islamic state|al-qaeda/],
+    ['ataque', /airstrike|drone strike|missile strike|missile|rocket|bombing|explosion|strike|attack|shelling/],
+    ['operacao_militar', /military operation|special operation|troops deployed|troops launched|ground operation|forces launched|raid|incursion/],
+    ['guerra', /war|battle|invasion|offensive|front line|frontline|combat|fighting|armed conflict/],
+    ['protesto', /protest|riot|demonstration|march|rally|unrest|clashes with police/],
+    ['diplomacia', /diplomacy|peace talks|negotiations|summit|ceasefire talks|treaty|agreement|mediator|diplomatic/],
+    ['humanitario', /humanitarian|humanitarian aid|aid delivery|refugees|displaced|evacuation|evacuate|civilian crisis|famine|food aid/],
+    ['sancao', /sanctions?|embargo|asset freeze|blacklist|travel ban|economic restrictions/],
+    ['politica', /election|government|president|prime minister|parliament|congress|cabinet|ministry|political crisis|resignation|vote/]
+  ];
+
+  for (const [tipo, regex] of regras) {
+    if (regex.test(t)) return tipo;
+  }
   return 'outro';
 }
 function adicionarEventoMemoria(e){ if(idsVistos.has(e.id)) return false; idsVistos.add(e.id); eventos.unshift(e); if(eventos.length>200) eventos.pop(); return true; }
