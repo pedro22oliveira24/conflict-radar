@@ -5,12 +5,15 @@ const cors = require('cors');
 const http = require('http');
 const path = require('path');
 const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 const parser = new Parser({ timeout: 10000 });
 app.use(cors());
+app.use(express.json({ limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const FEEDS = [
@@ -53,6 +56,7 @@ const CIDADES_NORMALIZADAS = CIDADES.map(([nome,lat,lng,pais]) => ({nome,lat,lng
 const eventos = [];
 const idsVistos = new Set();
 const DATABASE_URL = process.env.DATABASE_URL;
+const JWT_SECRET = process.env.JWT_SECRET || 'troque-esta-chave-em-producao-conflict-radar';
 const pool = DATABASE_URL ? new Pool({ connectionString: DATABASE_URL, ssl:{rejectUnauthorized:false}, max:5, idleTimeoutMillis:30000, connectionTimeoutMillis:10000 }) : null;
 
 function escaparRegex(valor){ return valor.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
@@ -85,7 +89,27 @@ function classificar(texto){
 }
 function adicionarEventoMemoria(e){ if(idsVistos.has(e.id)) return false; idsVistos.add(e.id); eventos.unshift(e); if(eventos.length>200) eventos.pop(); return true; }
 async function testarBanco(){ if(!pool)return false; try{await pool.query('SELECT 1');console.log('PostgreSQL conectado com sucesso!');return true;}catch(e){console.error('Falha ao conectar ao PostgreSQL:',e.message);return false;} }
-async function prepararBanco(){ if(!pool)return; await pool.query(`CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY,titulo TEXT,descricao TEXT,fonte TEXT,url TEXT,imagem TEXT,data TIMESTAMPTZ,tipo TEXT,pais TEXT,cidade TEXT,lat DOUBLE PRECISION,lng DOUBLE PRECISION,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`); await pool.query('CREATE INDEX IF NOT EXISTS events_data_idx ON events (data DESC)'); console.log('Tabela events pronta!'); }
+async function prepararBanco(){
+  if(!pool)return;
+  await pool.query(`CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY,titulo TEXT,descricao TEXT,fonte TEXT,url TEXT,imagem TEXT,data TIMESTAMPTZ,tipo TEXT,pais TEXT,cidade TEXT,lat DOUBLE PRECISION,lng DOUBLE PRECISION,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    nome TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    countries JSONB NOT NULL DEFAULT '[]'::jsonb,
+    alerts JSONB NOT NULL DEFAULT '[]'::jsonb,
+    filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  await pool.query('CREATE INDEX IF NOT EXISTS events_data_idx ON events (data DESC)');
+  await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx ON users ((LOWER(email)))');
+  console.log('Tabelas events e users prontas!');
+}
 async function salvarEvento(e){ if(!pool)return true; try{const r=await pool.query(`INSERT INTO events(id,titulo,descricao,fonte,url,imagem,data,tipo,pais,cidade,lat,lng) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(id) DO NOTHING RETURNING id`,[e.id,e.titulo,e.descricao,e.fonte,e.url,e.imagem,e.data,e.tipo,e.pais,e.cidade,e.lat,e.lng]);return r.rowCount>0;}catch(err){console.error('Erro ao salvar evento no PostgreSQL:',err.message);return false;} }
 async function carregarHistorico(){ if(!pool)return; try{const r=await pool.query(`SELECT id,titulo,descricao,fonte,url,imagem,data,tipo,pais,cidade,lat,lng FROM events ORDER BY COALESCE(data,created_at) DESC LIMIT 200`); eventos.length=0;idsVistos.clear();r.rows.forEach(adicionarEventoMemoria);console.log(`Histórico carregado: ${r.rows.length} eventos.`);}catch(e){console.error('Erro ao carregar histórico:',e.message);} }
 async function lerFeeds(){
@@ -99,6 +123,73 @@ async function lerFeeds(){
 }
 function broadcast(m){const t=JSON.stringify(m);wss.clients.forEach(c=>{if(c.readyState===1)c.send(t);});}
 wss.on('connection',ws=>{ws.send(JSON.stringify({tipo:'todos_eventos',dados:eventos}));});
+
+function gerarToken(user){
+  return jwt.sign({ id:user.id, email:user.email, nome:user.nome }, JWT_SECRET, { expiresIn:'7d' });
+}
+function auth(req,res,next){
+  const header=req.headers.authorization||'';
+  const token=header.startsWith('Bearer ')?header.slice(7):null;
+  if(!token) return res.status(401).json({erro:'Faça login para continuar.'});
+  try{ req.user=jwt.verify(token,JWT_SECRET); next(); }
+  catch(e){ return res.status(401).json({erro:'Sessão inválida ou expirada.'}); }
+}
+function sanitizarPreferencias(body){
+  const countries=Array.isArray(body.countries)?body.countries.filter(x=>typeof x==='string').slice(0,30):[];
+  const alerts=Array.isArray(body.alerts)?body.alerts.filter(x=>typeof x==='object'&&x).slice(0,30):[];
+  const filters=body.filters&&typeof body.filters==='object'&&!Array.isArray(body.filters)?body.filters:{};
+  return {countries,alerts,filters};
+}
+
+app.post('/api/auth/register',async(req,res)=>{
+  if(!pool)return res.status(503).json({erro:'PostgreSQL não configurado.'});
+  try{
+    const nome=String(req.body.nome||'').trim().slice(0,80);
+    const email=String(req.body.email||'').trim().toLowerCase();
+    const senha=String(req.body.senha||'');
+    if(nome.length<2) return res.status(400).json({erro:'Informe um nome válido.'});
+    if(!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({erro:'Informe um e-mail válido.'});
+    if(senha.length<6) return res.status(400).json({erro:'A senha deve ter pelo menos 6 caracteres.'});
+    const hash=await bcrypt.hash(senha,12);
+    const r=await pool.query('INSERT INTO users(nome,email,password_hash) VALUES($1,$2,$3) RETURNING id,nome,email',[nome,email,hash]);
+    const user=r.rows[0];
+    await pool.query('INSERT INTO user_preferences(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING',[user.id]);
+    res.status(201).json({token:gerarToken(user),user});
+  }catch(e){
+    if(e.code==='23505') return res.status(409).json({erro:'Este e-mail já está cadastrado.'});
+    console.error('Erro no cadastro:',e.message);res.status(500).json({erro:'Não foi possível criar a conta.'});
+  }
+});
+app.post('/api/auth/login',async(req,res)=>{
+  if(!pool)return res.status(503).json({erro:'PostgreSQL não configurado.'});
+  try{
+    const email=String(req.body.email||'').trim().toLowerCase();
+    const senha=String(req.body.senha||'');
+    const r=await pool.query('SELECT id,nome,email,password_hash FROM users WHERE LOWER(email)=LOWER($1)',[email]);
+    const user=r.rows[0];
+    if(!user || !(await bcrypt.compare(senha,user.password_hash))) return res.status(401).json({erro:'E-mail ou senha incorretos.'});
+    res.json({token:gerarToken(user),user:{id:user.id,nome:user.nome,email:user.email}});
+  }catch(e){console.error('Erro no login:',e.message);res.status(500).json({erro:'Não foi possível fazer login.'});}
+});
+app.get('/api/auth/me',auth,(req,res)=>res.json({user:{id:req.user.id,nome:req.user.nome,email:req.user.email}}));
+app.get('/api/preferences',auth,async(req,res)=>{
+  try{
+    const r=await pool.query('SELECT countries,alerts,filters,updated_at FROM user_preferences WHERE user_id=$1',[req.user.id]);
+    res.json(r.rows[0]||{countries:[],alerts:[],filters:{}});
+  }catch(e){res.status(500).json({erro:'Não foi possível carregar suas preferências.'});}
+});
+app.put('/api/preferences',auth,async(req,res)=>{
+  try{
+    const p=sanitizarPreferencias(req.body||{});
+    const r=await pool.query(`INSERT INTO user_preferences(user_id,countries,alerts,filters,updated_at)
+      VALUES($1,$2::jsonb,$3::jsonb,$4::jsonb,NOW())
+      ON CONFLICT(user_id) DO UPDATE SET countries=EXCLUDED.countries,alerts=EXCLUDED.alerts,filters=EXCLUDED.filters,updated_at=NOW()
+      RETURNING countries,alerts,filters,updated_at`,
+      [req.user.id,JSON.stringify(p.countries),JSON.stringify(p.alerts),JSON.stringify(p.filters)]);
+    res.json(r.rows[0]);
+  }catch(e){console.error('Erro nas preferências:',e.message);res.status(500).json({erro:'Não foi possível salvar suas preferências.'});}
+});
+
 app.get('/api/eventos',(req,res)=>res.json(eventos));
 app.get('/api/historico',async(req,res)=>{
   if(!pool)return res.status(503).json({erro:'PostgreSQL não configurado.'});
