@@ -8,7 +8,7 @@ body {
 
 body.modal-aberto { overflow: hidden; }
 
-.topo { background: #06101f; padding: 20px; border-bottom: 1px solid #1e293b; }
+.topo { background: #06101f; padding: 20px; border-bottom: 1px solid #1e293b; display:flex; align-items:center; justify-content:space-between; gap:20px; }
 .logo { font-size: 50px; font-weight: bold; }
 .subtitulo { color: #94a3b8; }
 
@@ -331,7 +331,10 @@ body.modal-aberto { overflow: hidden; }
 
 /* ─── USUÁRIOS ───────────────────────────────────────────────────────────── */
 .topo { display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.acoes-conta { display:flex; align-items:center; gap:10px; }
 .botao-conta { background:#2563eb; color:#fff; border:0; border-radius:10px; padding:11px 16px; cursor:pointer; font-weight:bold; }
+.botao-cadastro { background:#16a34a; color:#fff; border:0; border-radius:10px; padding:11px 16px; cursor:pointer; font-weight:bold; }
+.botao-cadastro:hover { background:#15803d; }
 .botao-conta:hover { background:#1d4ed8; }
 .modal-usuario { max-width:560px; }
 .abas-auth { display:flex; gap:8px; margin:15px 0; }
