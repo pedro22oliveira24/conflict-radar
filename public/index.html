@@ -97,25 +97,55 @@
     <!-- MODAL DE USUÁRIO -->
     <div id="modal-usuario" class="modal-fundo" style="display:none">
         <div class="modal-caixa modal-usuario">
-            <button id="fechar-usuario">✖</button>
+            <button id="fechar-usuario" class="fechar-usuario" aria-label="Fechar">✕</button>
             <div id="auth-area">
-                <h2>👤 Minha conta</h2>
-                <div class="abas-auth">
-                    <button class="aba-auth ativa" data-auth="login">Entrar</button>
-                    <button class="aba-auth" data-auth="cadastro">Cadastro</button>
+                <div class="auth-cabecalho">
+                    <div class="auth-logo">🌍</div>
+                    <div>
+                        <span class="auth-overline">CONFLICT RADAR</span>
+                        <h2>Acesse sua conta</h2>
+                        <p>Gerencie seus países, alertas e filtros em um só lugar.</p>
+                    </div>
                 </div>
+
+                <div class="abas-auth" role="tablist" aria-label="Autenticação">
+                    <button class="aba-auth ativa" data-auth="login" type="button">Entrar</button>
+                    <button class="aba-auth" data-auth="cadastro" type="button">Criar conta</button>
+                </div>
+
                 <form id="form-login" class="form-auth">
-                    <input id="login-email" type="email" placeholder="E-mail" required>
-                    <input id="login-senha" type="password" placeholder="Senha" required minlength="6">
-                    <button type="submit">Entrar</button>
+                    <div class="campo-auth">
+                        <label for="login-email">E-mail</label>
+                        <input id="login-email" type="email" placeholder="voce@exemplo.com" autocomplete="email" required>
+                    </div>
+                    <div class="campo-auth">
+                        <label for="login-senha">Senha</label>
+                        <input id="login-senha" type="password" placeholder="Digite sua senha" autocomplete="current-password" required minlength="6">
+                    </div>
+                    <button class="botao-auth-principal" type="submit"><span>Entrar na conta</span><span>→</span></button>
+                    <p class="auth-rodape">Seus dados ficam associados à sua conta para preservar suas preferências.</p>
                 </form>
+
                 <form id="form-cadastro" class="form-auth" style="display:none">
-                    <input id="cadastro-nome" type="text" placeholder="Nome" required minlength="2">
-                    <input id="cadastro-email" type="email" placeholder="E-mail" required>
-                    <input id="cadastro-senha" type="password" placeholder="Senha (mínimo 6 caracteres)" required minlength="6">
-                    <button type="submit">Criar conta</button>
+                    <div class="campo-auth">
+                        <label for="cadastro-nome">Nome</label>
+                        <input id="cadastro-nome" type="text" placeholder="Como podemos chamar você?" autocomplete="name" required minlength="2">
+                    </div>
+                    <div class="campo-auth">
+                        <label for="cadastro-email">E-mail</label>
+                        <input id="cadastro-email" type="email" placeholder="voce@exemplo.com" autocomplete="email" required>
+                    </div>
+                    <div class="campo-auth">
+                        <label for="cadastro-senha">Senha</label>
+                        <input id="cadastro-senha" type="password" placeholder="Mínimo de 6 caracteres" autocomplete="new-password" required minlength="6">
+                        <span class="campo-ajuda">Use uma senha que você não utiliza em outros serviços.</span>
+                    </div>
+                    <button class="botao-auth-principal botao-cadastro-modal" type="submit"><span>Criar minha conta</span><span>→</span></button>
+                    <p class="auth-rodape">Ao criar sua conta, suas preferências poderão ser salvas para os próximos acessos.</p>
                 </form>
-                <p id="auth-erro" class="auth-erro"></p>
+
+                <div id="auth-mensagem" class="auth-mensagem" aria-live="polite"></div>
+                <p id="auth-erro" class="auth-erro" aria-live="polite"></p>
             </div>
             <div id="painel-usuario" style="display:none">
                 <h2>👤 Minha conta</h2>
