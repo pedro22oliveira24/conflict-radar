@@ -130,39 +130,69 @@ let filtroPais   = null;
 // ─── WEBSOCKET ────────────────────────────────────────────────────────────────
 const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
 let ws;
-
 let reconnectTimer = null;
-function conectarWS() {
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-  ws = new WebSocket(WS_URL);
+let pollingTimer = null;
+let wsOnline = false;
 
-  ws.onopen = () => {
-    document.getElementById('status-conexao').textContent = '🟢 Conectado — atualizando a cada 30s';
-    document.getElementById('status-conexao').className = 'status-conectado';
-  };
+function atualizarStatus(texto, classe){
+  const el=document.getElementById('status-conexao');
+  if(!el) return;
+  el.textContent=texto;
+  el.className=classe;
+}
 
-  ws.onclose = () => {
-    document.getElementById('status-conexao').textContent = '🔴 Desconectado — reconectando...';
-    document.getElementById('status-conexao').className = 'status-desconectado';
-    reconnectTimer = setTimeout(conectarWS, 3000);
-  };
+async function sincronizarEventosHTTP(){
+  try{
+    const r=await fetch('/api/eventos',{cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const dados=await r.json();
+    if(Array.isArray(dados)){ todosEventos=dados; renderizar(); return true; }
+  }catch(e){ console.warn('Falha na sincronização HTTP:',e.message); }
+  return false;
+}
 
-  ws.onerror = () => ws.close();
+function iniciarPollingFallback(){
+  if(pollingTimer) return;
+  sincronizarEventosHTTP();
+  pollingTimer=setInterval(sincronizarEventosHTTP,30000);
+}
+function pararPollingFallback(){
+  if(pollingTimer){ clearInterval(pollingTimer); pollingTimer=null; }
+}
 
-  ws.onmessage = (msg) => {
-    const pacote = JSON.parse(msg.data);
-    if (pacote.tipo === 'todos_eventos') {
-      todosEventos = pacote.dados;
-      renderizar();
-    }
-    if (pacote.tipo === 'novos_eventos') {
-      todosEventos = [...pacote.dados, ...todosEventos].slice(0, 200);
-      renderizar();
-    }
+function conectarWS(){
+  if(reconnectTimer){ clearTimeout(reconnectTimer); reconnectTimer=null; }
+  try{ ws=new WebSocket(WS_URL); }catch(e){
+    wsOnline=false; atualizarStatus('🟡 Modo alternativo — sincronizando eventos','status-desconectado'); iniciarPollingFallback(); return;
+  }
+  ws.onopen=()=>{ wsOnline=true; pararPollingFallback(); atualizarStatus('🟢 Conectado — atualizando em tempo real','status-conectado'); };
+  ws.onclose=()=>{ wsOnline=false; atualizarStatus('🟡 Modo alternativo — reconectando...','status-desconectado'); iniciarPollingFallback(); reconnectTimer=setTimeout(conectarWS,5000); };
+  ws.onerror=()=>{ wsOnline=false; iniciarPollingFallback(); try{ws.close();}catch(e){} };
+  ws.onmessage=(msg)=>{
+    try{
+      const pacote=JSON.parse(msg.data);
+      if(pacote.tipo==='todos_eventos'){ todosEventos=Array.isArray(pacote.dados)?pacote.dados:[]; renderizar(); }
+      else if(pacote.tipo==='novos_eventos'){
+        const novos=Array.isArray(pacote.dados)?pacote.dados:[];
+        const mapa=new Map([...novos,...todosEventos].map(e=>[e.id,e]));
+        todosEventos=Array.from(mapa.values()).slice(0,200); renderizar();
+      }
+    }catch(e){ console.error('Mensagem WebSocket inválida:',e); }
   };
 }
 
+sincronizarEventosHTTP();
 conectarWS();
+
+let territoriosVisiveis=true;
+function alternarTerritorios(){
+  territoriosVisiveis=!territoriosVisiveis;
+  Object.values(geojsonLayers).forEach(layer=>{
+    if(territoriosVisiveis){ if(!map.hasLayer(layer)) layer.addTo(map); }
+    else { if(map.hasLayer(layer)) map.removeLayer(layer); }
+  });
+}
+window.alternarTerritorios=alternarTerritorios;
 
 // ─── FILTROS ──────────────────────────────────────────────────────────────────
 function aplicarFiltro(tipo) {
@@ -195,11 +225,18 @@ function atualizarCoresTerritorios(tipo) {
     'sancao':      { fillOpacity: 0.3, opacity: 0.6 },
   };
 
-  const estilo = intensidade[tipo] || intensidade['todos'];
-
-  Object.values(geojsonLayers).forEach(layer => {
-    if (layer.setStyle) {
-      layer.setStyle(estilo);
+  const intensidadeAtual = intensidade[tipo] || intensidade['todos'];
+  const cores = {
+    UKR:'#3b82f6', RUS:'#ef4444', ISR:'#3b82f6', PSE:'#fca5a5', SYR:'#3b82f6', GAZA:'#ef4444'
+  };
+  Object.entries(geojsonLayers).forEach(([codigo,layer]) => {
+    if(layer && layer.setStyle){
+      layer.setStyle({
+        fillColor: cores[codigo] || '#64748b',
+        color: cores[codigo] || '#64748b',
+        fillOpacity: intensidadeAtual.fillOpacity,
+        opacity: intensidadeAtual.opacity
+      });
     }
   });
 }
@@ -369,8 +406,10 @@ async function apiUsuario(url, options={}){
   const token = tokenAuth();
   if(token) headers.Authorization = 'Bearer ' + token;
   const r = await fetch(url, {...options, headers});
-  const data = await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error(data.erro || 'Não foi possível concluir a operação.');
+  const texto = await r.text();
+  let data={};
+  try{ data=texto ? JSON.parse(texto) : {}; }catch(e){}
+  if(!r.ok) throw new Error(data.erro || 'Servidor respondeu HTTP '+r.status+'.');
   return data;
 }
 function abrirUsuario(){
@@ -466,6 +505,7 @@ document.getElementById('salvar-filtros').onclick=async()=>{
 };
 document.getElementById('sair-conta').onclick=()=>{localStorage.removeItem('conflictRadarToken');sessao=null;preferencias={countries:[],alerts:[],filters:{}};document.getElementById('pref-status').textContent='';atualizarPainelUsuario();};
 
+window.addEventListener('error',e=>console.error('Erro no Conflict Radar:',e.error||e.message));
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', inicializarControlesInterface); else inicializarControlesInterface();
 
 (async function restaurarSessao(){
