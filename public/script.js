@@ -104,13 +104,16 @@ carregarTerritorios();
 
 // ─── ÍCONES ───────────────────────────────────────────────────────────────────
 const ICONES = {
-  guerra:      criarIcone('🔴'),
-  ataque:      criarIcone('🟠'),
-  protesto:    criarIcone('🟡'),
-  diplomacia:  criarIcone('🔵'),
+  guerra: criarIcone('🔴'),
+  ataque: criarIcone('🟠'),
+  terrorismo: criarIcone('🟣'),
+  operacao_militar: criarIcone('🪖'),
+  protesto: criarIcone('🟡'),
+  diplomacia: criarIcone('🔵'),
   humanitario: criarIcone('🟢'),
-  sancao:      criarIcone('⚫'),
-  outro:       criarIcone('⚪'),
+  sancao: criarIcone('⚫'),
+  politica: criarIcone('🏛️'),
+  outro: criarIcone('⚪'),
 };
 
 function criarIcone(emoji) {
@@ -124,8 +127,13 @@ function criarIcone(emoji) {
 
 // ─── ESTADO ───────────────────────────────────────────────────────────────────
 let todosEventos = [];
-let filtroTipo   = 'todos';
-let filtroPais   = null;
+let filtroTipo = 'todos';
+let filtroPais = null;
+let filtroTexto = '';
+let filtroPeriodo = 'todos';
+let filtroDataInicio = '';
+let filtroDataFim = '';
+let filtroPaisSelect = '';
 
 // ─── WEBSOCKET ────────────────────────────────────────────────────────────────
 const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
@@ -196,8 +204,13 @@ window.alternarTerritorios=alternarTerritorios;
 
 // ─── FILTROS ──────────────────────────────────────────────────────────────────
 function aplicarFiltro(tipo) {
-  filtroTipo = tipo;
+  filtroTipo = tipo || 'todos';
+  const selectTipo = document.getElementById('filtro-tipo-mapa');
+  if (selectTipo) selectTipo.value = filtroTipo;
   filtroPais = null;
+  filtroPaisSelect = '';
+  const selectPais = document.getElementById('filtro-pais-mapa');
+  if (selectPais) selectPais.value = '';
   document.getElementById('titulo-feed').textContent = '📰 Global Conflict News';
   abrirFeed();
   renderizar();
@@ -206,7 +219,12 @@ function aplicarFiltro(tipo) {
 
 function filtrarPais(pais) {
   filtroPais = pais;
+  filtroPaisSelect = pais;
   filtroTipo = 'todos';
+  const selectPais = document.getElementById('filtro-pais-mapa');
+  if (selectPais) selectPais.value = pais;
+  const selectTipo = document.getElementById('filtro-tipo-mapa');
+  if (selectTipo) selectTipo.value = 'todos';
   document.getElementById('titulo-feed').textContent = `📰 ${pais}`;
   map.setView(centroPais(pais), 6);
   abrirFeed();
@@ -252,15 +270,31 @@ function centroPais(pais) {
 
 // ─── FILTRO DE EVENTOS ────────────────────────────────────────────────────────
 function eventosFiltrados() {
+  const agora = Date.now();
+  const inicioPeriodo = filtroPeriodo === '24h' ? agora - 24 * 60 * 60 * 1000
+    : filtroPeriodo === '7d' ? agora - 7 * 24 * 60 * 60 * 1000
+    : filtroPeriodo === '30d' ? agora - 30 * 24 * 60 * 60 * 1000 : null;
+  const inicioManual = filtroDataInicio ? new Date(filtroDataInicio + 'T00:00:00').getTime() : null;
+  const fimManual = filtroDataFim ? new Date(filtroDataFim + 'T23:59:59.999').getTime() : null;
+  const texto = filtroTexto.trim().toLocaleLowerCase('pt-BR');
+
   return todosEventos.filter(e => {
     const passaTipo = filtroTipo === 'todos' || e.tipo === filtroTipo;
-    const passaPais = !filtroPais || e.pais === filtroPais;
-    return passaTipo && passaPais;
+    const paisSelecionado = filtroPaisSelect || filtroPais;
+    const passaPais = !paisSelecionado || e.pais === paisSelecionado;
+    const timestamp = Date.parse(e.data || '') || 0;
+    const passaPeriodo = !inicioPeriodo || timestamp >= inicioPeriodo;
+    const passaInicio = !inicioManual || timestamp >= inicioManual;
+    const passaFim = !fimManual || timestamp <= fimManual;
+    const haystack = [e.titulo, e.descricao, e.fonte, e.pais, e.cidade, tipoLabel(e.tipo)].join(' ').toLocaleLowerCase('pt-BR');
+    const passaTexto = !texto || haystack.includes(texto);
+    return passaTipo && passaPais && passaPeriodo && passaInicio && passaFim && passaTexto;
   });
 }
 
 // ─── RENDERIZAR ───────────────────────────────────────────────────────────────
 function renderizar() {
+  atualizarOpcoesPaises();
   const lista = eventosFiltrados();
   atualizarMapa(lista);
   atualizarContadores(lista);
@@ -268,27 +302,53 @@ function renderizar() {
   atualizarTimeline(lista);
 }
 
+function escaparHTML(valor) {
+  return String(valor ?? '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  }[c]));
+}
+
 function atualizarMapa(lista) {
   markers.clearLayers();
-  lista.forEach(e => {
-    const m = L.marker([e.lat, e.lng], { icon: ICONES[e.tipo] || ICONES.outro });
+  const validos = lista.filter(e => Number.isFinite(Number(e.lat)) && Number.isFinite(Number(e.lng)));
+  validos.forEach(e => {
+    const m = L.marker([Number(e.lat), Number(e.lng)], { icon: ICONES[e.tipo] || ICONES.outro });
+    const titulo = escaparHTML(e.titulo || 'Notícia sem título');
+    const fonte = escaparHTML(e.fonte || 'Fonte não informada');
+    const cidade = escaparHTML(e.cidade || 'Local não identificado');
+    const pais = escaparHTML(e.pais || 'País não identificado');
+    const urlSegura = typeof e.url === 'string' && /^https?:\/\//i.test(e.url) ? e.url : '';
     m.bindPopup(`
-      <div style="max-width:260px">
-        <strong style="font-size:13px">${e.titulo}</strong><br>
-        <small style="color:#555">${e.fonte} · ${formatarData(e.data)}</small><br>
-        <span style="font-size:12px">📍 ${e.cidade} — ${tipoLabel(e.tipo)}</span><br><br>
-        <a href="${e.url}" target="_blank" style="color:#2563eb">Ler notícia →</a>
+      <div style="max-width:280px">
+        <strong style="font-size:13px">${titulo}</strong><br>
+        <small style="color:#555">Fonte: ${fonte}</small><br>
+        <small style="color:#555">Publicado: ${escaparHTML(formatarData(e.data) || 'Data não informada')}</small><br>
+        <span style="font-size:12px">📍 ${cidade}, ${pais} — ${tipoLabel(e.tipo)}</span><br><br>
+        <button type="button" class="abrir-detalhes-marcador" style="padding:6px 9px;cursor:pointer">Ver detalhes</button>
+        ${urlSegura ? '<br><a href="' + escaparHTML(urlSegura) + '" target="_blank" rel="noopener noreferrer" style="color:#2563eb">Abrir fonte original →</a>' : ''}
       </div>
     `);
+    m.on('popupopen', () => {
+      const popup = m.getPopup()?.getElement();
+      const botao = popup?.querySelector('.abrir-detalhes-marcador');
+      if (botao) botao.onclick = () => abrirModal(String(e.id));
+    });
     markers.addLayer(m);
   });
+  atualizarResumoFiltros(lista.length, validos.length);
+}
+
+function atualizarResumoFiltros(total, comCoordenadas) {
+  const el = document.getElementById('resultado-filtros-mapa');
+  if (el) el.textContent = total + ' evento(s) encontrados · ' + comCoordenadas + ' com localização no mapa';
 }
 
 function atualizarContadores(lista) {
-  const contagem = { guerra:0, ataque:0, protesto:0, diplomacia:0, humanitario:0, sancao:0 };
+  const ids = { guerra:'guerras', ataque:'ataques', protesto:'protestos', diplomacia:'diplomacia', humanitario:'humanitario', sancao:'sancao' };
+  const contagem = Object.fromEntries(Object.keys(ids).map(tipo => [tipo, 0]));
   lista.forEach(e => { if (contagem[e.tipo] !== undefined) contagem[e.tipo]++; });
   Object.entries(contagem).forEach(([tipo, n]) => {
-    const el = document.getElementById(tipo);
+    const el = document.getElementById(ids[tipo]);
     if (el) el.textContent = n;
   });
 }
@@ -322,16 +382,18 @@ function atualizarTimeline(lista) {
 }
 
 function abrirModal(id) {
-  const e = todosEventos.find(ev => ev.id === id);
+  const e = todosEventos.find(ev => String(ev.id) === String(id));
   if (!e) return;
+  const imagem = typeof e.imagem === 'string' && /^https?:\/\//i.test(e.imagem) ? e.imagem : '';
+  const url = typeof e.url === 'string' && /^https?:\/\//i.test(e.url) ? e.url : '';
   document.getElementById('modal-conteudo').innerHTML = `
-    ${e.imagem ? `<img src="${e.imagem}" style="width:100%;border-radius:10px;margin-bottom:12px" onerror="this.style.display='none'">` : ''}
-    <div class="noticia-tipo ${e.tipo}" style="margin-bottom:10px">${tipoLabel(e.tipo)}</div>
-    <h2 style="margin:0 0 8px;font-size:18px;color:#111">${e.titulo}</h2>
-    <p style="color:#555;font-size:13px;margin:0 0 6px">📍 ${e.cidade}, ${e.pais}</p>
-    <p style="color:#555;font-size:13px;margin:0 0 12px">📅 ${formatarData(e.data)} — ${e.fonte}</p>
-    ${e.descricao ? `<p style="color:#333;font-size:14px;line-height:1.6;margin-bottom:14px">${e.descricao}</p>` : ''}
-    <a href="${e.url}" target="_blank" style="color:#2563eb;font-size:14px">🔗 Ler notícia original →</a>
+    ${imagem ? `<img src="${escaparHTML(imagem)}" style="width:100%;border-radius:10px;margin-bottom:12px" onerror="this.style.display='none'">` : ''}
+    <div class="noticia-tipo ${escaparHTML(e.tipo)}" style="margin-bottom:10px">${tipoLabel(e.tipo)}</div>
+    <h2 style="margin:0 0 8px;font-size:18px;color:#111">${escaparHTML(e.titulo || 'Notícia sem título')}</h2>
+    <p style="color:#555;font-size:13px;margin:0 0 6px">📍 ${escaparHTML(e.cidade || 'Local não identificado')}, ${escaparHTML(e.pais || 'País não identificado')}</p>
+    <p style="color:#555;font-size:13px;margin:0 0 12px">📅 Publicado: ${escaparHTML(formatarData(e.data) || 'Data não informada')} — Fonte: ${escaparHTML(e.fonte || 'Não informada')}</p>
+    ${e.descricao ? `<p style="color:#333;font-size:14px;line-height:1.6;margin-bottom:14px">${escaparHTML(e.descricao)}</p>` : ''}
+    ${url ? `<a href="${escaparHTML(url)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;font-size:14px">🔗 Ler notícia original →</a>` : '<p>Link da fonte não disponível.</p>'}
   `;
   document.getElementById('modal').style.display = 'flex';
 }
@@ -351,13 +413,57 @@ function abrirFeed() {
 
 
 
-document.getElementById('pesquisa').addEventListener('keyup', (e) => {
-  const valor = e.target.value.toLowerCase();
-  const botoes = document.querySelectorAll('.grupo-esquerda > button, .filtros > button');
-  botoes.forEach(b => {
-    b.style.display = b.innerText.toLowerCase().includes(valor) ? 'inline-block' : 'none';
-  });
+const campoPesquisa = document.getElementById('pesquisa');
+if (campoPesquisa) campoPesquisa.addEventListener('input', e => {
+  filtroTexto = e.target.value || '';
+  renderizar();
 });
+
+function inicializarFiltrosMapa() {
+  const paisSelect = document.getElementById('filtro-pais-mapa');
+  const tipoSelect = document.getElementById('filtro-tipo-mapa');
+  const periodoSelect = document.getElementById('filtro-periodo-mapa');
+  const inicioInput = document.getElementById('filtro-data-inicio');
+  const fimInput = document.getElementById('filtro-data-fim');
+  if (paisSelect) paisSelect.addEventListener('change', () => {
+    filtroPaisSelect = paisSelect.value;
+    filtroPais = null;
+    if (paisSelect.value) {
+      document.getElementById('titulo-feed').textContent = '📰 ' + paisSelect.options[paisSelect.selectedIndex].text;
+      map.setView(centroPais(paisSelect.value), 5);
+    } else {
+      document.getElementById('titulo-feed').textContent = '📰 Global Conflict News';
+    }
+    renderizar();
+  });
+  if (tipoSelect) tipoSelect.addEventListener('change', () => { filtroTipo = tipoSelect.value; renderizar(); atualizarCoresTerritorios(filtroTipo); });
+  if (periodoSelect) periodoSelect.addEventListener('change', () => { filtroPeriodo = periodoSelect.value; renderizar(); });
+  if (inicioInput) inicioInput.addEventListener('change', () => { filtroDataInicio = inicioInput.value; renderizar(); });
+  if (fimInput) fimInput.addEventListener('change', () => { filtroDataFim = fimInput.value; renderizar(); });
+  const limpar = document.getElementById('limpar-filtros-mapa');
+  if (limpar) limpar.addEventListener('click', () => {
+    filtroTipo = 'todos'; filtroPais = null; filtroPaisSelect = ''; filtroTexto = '';
+    filtroPeriodo = 'todos'; filtroDataInicio = ''; filtroDataFim = '';
+    if (paisSelect) paisSelect.value = '';
+    if (tipoSelect) tipoSelect.value = 'todos';
+    if (periodoSelect) periodoSelect.value = 'todos';
+    if (inicioInput) inicioInput.value = '';
+    if (fimInput) fimInput.value = '';
+    if (campoPesquisa) campoPesquisa.value = '';
+    document.getElementById('titulo-feed').textContent = '📰 Global Conflict News';
+    renderizar(); atualizarCoresTerritorios('todos');
+  });
+}
+
+function atualizarOpcoesPaises() {
+  const select = document.getElementById('filtro-pais-mapa');
+  if (!select) return;
+  const atual = filtroPaisSelect || select.value;
+  const paises = [...new Set(todosEventos.map(e => e.pais).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'pt-BR'));
+  select.innerHTML = '<option value="">Todos os países</option>' + paises.map(p => '<option value="' + escaparHTML(p) + '">' + escaparHTML(p) + '</option>').join('');
+  if (paises.includes(atual)) select.value = atual;
+  else { select.value = ''; filtroPaisSelect = ''; }
+}
 
 function formatarData(iso) {
   if (!iso) return '';
@@ -367,8 +473,10 @@ function formatarData(iso) {
 
 function tipoLabel(tipo) {
   const labels = {
-    guerra: '🔴 Guerra', ataque: '🟠 Ataque', protesto: '🟡 Protesto',
-    diplomacia: '🔵 Diplomacia', humanitario: '🟢 Humanitário', sancao: '⚫ Sanção', outro: '⚪ Outro'
+    guerra: '🔴 Guerra', ataque: '🟠 Ataque', terrorismo: '🟣 Terrorismo',
+    operacao_militar: '🪖 Operação militar', protesto: '🟡 Protesto',
+    diplomacia: '🔵 Diplomacia', humanitario: '🟢 Humanitário',
+    sancao: '⚫ Sanção', politica: '🏛️ Política', outro: '⚪ Outro'
   };
   return labels[tipo] || '⚪ Outro';
 }
@@ -506,6 +614,7 @@ document.getElementById('salvar-filtros').onclick=async()=>{
 document.getElementById('sair-conta').onclick=()=>{localStorage.removeItem('conflictRadarToken');sessao=null;preferencias={countries:[],alerts:[],filters:{}};document.getElementById('pref-status').textContent='';atualizarPainelUsuario();};
 
 window.addEventListener('error',e=>console.error('Erro no Conflict Radar:',e.error||e.message));
+inicializarFiltrosMapa();
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', inicializarControlesInterface); else inicializarControlesInterface();
 
 (async function restaurarSessao(){
