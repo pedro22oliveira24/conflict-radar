@@ -55,9 +55,17 @@ const CIDADES = [
 const CIDADES_NORMALIZADAS = CIDADES.map(([nome,lat,lng,pais]) => ({nome,lat,lng,pais}));
 const eventos = [];
 const idsVistos = new Set();
+const idsPersistidos = new Set();
+let dbPronto = false;
+let ultimoErroBancoLog = 0;
+let lendoFeeds = false;
 const DATABASE_URL = process.env.DATABASE_URL;
 const JWT_SECRET = process.env.JWT_SECRET || 'troque-esta-chave-em-producao-conflict-radar';
 const pool = DATABASE_URL ? new Pool({ connectionString: DATABASE_URL, ssl:{rejectUnauthorized:false}, max:5, idleTimeoutMillis:30000, connectionTimeoutMillis:10000 }) : null;
+if (pool) pool.on('error', (e) => {
+  dbPronto = false;
+  registrarErroBanco('Erro na conexão PostgreSQL', e);
+});
 
 function escaparRegex(valor){ return valor.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
 function detectarCidade(texto){
@@ -88,38 +96,130 @@ function classificar(texto){
   return 'outro';
 }
 function adicionarEventoMemoria(e){ if(idsVistos.has(e.id)) return false; idsVistos.add(e.id); eventos.unshift(e); if(eventos.length>200) eventos.pop(); return true; }
-async function testarBanco(){ if(!pool)return false; try{await pool.query('SELECT 1');console.log('PostgreSQL conectado com sucesso!');return true;}catch(e){console.error('Falha ao conectar ao PostgreSQL:',e.message);return false;} }
+function registrarErroBanco(contexto, erro) {
+  const agora = Date.now();
+  if (agora - ultimoErroBancoLog >= 30000) {
+    console.error(contexto + ': ' + (erro && erro.message ? erro.message : erro));
+    ultimoErroBancoLog = agora;
+  }
+}
 async function prepararBanco(){
-  if(!pool)return;
-  await pool.query(`CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY,titulo TEXT,descricao TEXT,fonte TEXT,url TEXT,imagem TEXT,data TIMESTAMPTZ,tipo TEXT,pais TEXT,cidade TEXT,lat DOUBLE PRECISION,lng DOUBLE PRECISION,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
-    nome TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS user_preferences (
-    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    countries JSONB NOT NULL DEFAULT '[]'::jsonb,
-    alerts JSONB NOT NULL DEFAULT '[]'::jsonb,
-    filters JSONB NOT NULL DEFAULT '{}'::jsonb,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`);
+  if(!pool) throw new Error('DATABASE_URL não configurada.');
+  await pool.query('CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY,titulo TEXT,descricao TEXT,fonte TEXT,url TEXT,imagem TEXT,data TIMESTAMPTZ,tipo TEXT,pais TEXT,cidade TEXT,lat DOUBLE PRECISION,lng DOUBLE PRECISION,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())');
+  await pool.query('CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY,nome TEXT NOT NULL,email TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())');
+  await pool.query("CREATE TABLE IF NOT EXISTS user_preferences (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,countries JSONB NOT NULL DEFAULT '[]'::jsonb,alerts JSONB NOT NULL DEFAULT '[]'::jsonb,filters JSONB NOT NULL DEFAULT '{}'::jsonb,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
   await pool.query('CREATE INDEX IF NOT EXISTS events_data_idx ON events (data DESC)');
   await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx ON users ((LOWER(email)))');
-  console.log('Tabelas events e users prontas!');
+  console.log('Tabelas events, users e user_preferences prontas!');
 }
-async function salvarEvento(e){ if(!pool)return true; try{const r=await pool.query(`INSERT INTO events(id,titulo,descricao,fonte,url,imagem,data,tipo,pais,cidade,lat,lng) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(id) DO NOTHING RETURNING id`,[e.id,e.titulo,e.descricao,e.fonte,e.url,e.imagem,e.data,e.tipo,e.pais,e.cidade,e.lat,e.lng]);return r.rowCount>0;}catch(err){console.error('Erro ao salvar evento no PostgreSQL:',err.message);return false;} }
-async function carregarHistorico(){ if(!pool)return; try{const r=await pool.query(`SELECT id,titulo,descricao,fonte,url,imagem,data,tipo,pais,cidade,lat,lng FROM events ORDER BY COALESCE(data,created_at) DESC LIMIT 200`); eventos.length=0;idsVistos.clear();r.rows.forEach(adicionarEventoMemoria);console.log(`Histórico carregado: ${r.rows.length} eventos.`);}catch(e){console.error('Erro ao carregar histórico:',e.message);} }
+async function salvarEvento(e){
+  if(!pool || !dbPronto) return false;
+  try {
+    await pool.query('INSERT INTO events(id,titulo,descricao,fonte,url,imagem,data,tipo,pais,cidade,lat,lng) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(id) DO NOTHING',
+      [e.id,e.titulo,e.descricao,e.fonte,e.url,e.imagem,e.data,e.tipo,e.pais,e.cidade,e.lat,e.lng]);
+    idsPersistidos.add(e.id);
+    return true;
+  } catch(err) {
+    dbPronto = false;
+    registrarErroBanco('Erro ao salvar evento no PostgreSQL', err);
+    return false;
+  }
+}
+async function carregarHistorico(){
+  if(!pool) return;
+  const r = await pool.query('SELECT id,titulo,descricao,fonte,url,imagem,data,tipo,pais,cidade,lat,lng,created_at FROM events ORDER BY COALESCE(data,created_at) DESC LIMIT 200');
+  r.rows.forEach(e => idsPersistidos.add(e.id));
+  // Preserva os eventos recebidos enquanto o banco estava indisponível.
+  const unicos = new Map();
+  for (const evento of [...eventos, ...r.rows]) {
+    if (evento && evento.id && !unicos.has(evento.id)) unicos.set(evento.id, evento);
+  }
+  const ordenados = [...unicos.values()].sort((a, b) => {
+    const dataA = Date.parse(a.data || a.created_at || '') || 0;
+    const dataB = Date.parse(b.data || b.created_at || '') || 0;
+    return dataB - dataA;
+  }).slice(0, 200);
+  eventos.splice(0, eventos.length, ...ordenados);
+  idsVistos.clear();
+  eventos.forEach(e => idsVistos.add(e.id));
+  console.log('Histórico carregado do banco: ' + r.rows.length + ' eventos.');
+}
+async function sincronizarEventosPendentes(){
+  if(!pool || !dbPronto) return;
+  for(const evento of [...eventos].reverse()){
+    if(idsPersistidos.has(evento.id)) continue;
+    if(!(await salvarEvento(evento))) break;
+  }
+}
+async function monitorarBanco(){
+  if(!pool){
+    console.error('DATABASE_URL não configurada; o mapa continuará usando eventos em memória, mas login e preferências ficarão indisponíveis.');
+    return;
+  }
+  while(true){
+    try {
+      await pool.query('SELECT 1');
+      if(!dbPronto){
+        await prepararBanco();
+        await carregarHistorico();
+        dbPronto = true;
+        await sincronizarEventosPendentes();
+        if(dbPronto) console.log('PostgreSQL pronto: cadastro, login e preferências habilitados.');
+      }
+    } catch(e) {
+      dbPronto = false;
+      registrarErroBanco('PostgreSQL indisponível; nova tentativa em 30 segundos', e);
+    }
+    await new Promise(resolve => setTimeout(resolve, 30000));
+  }
+}
 async function lerFeeds(){
-  console.log(`[${new Date().toISOString()}] Atualizando feeds RSS...`); const novos=[];
-  for(const feed of FEEDS){ try{const resultado=await parser.parseURL(feed.url); for(const item of resultado.items){
-    const texto=`${item.title||''} ${item.contentSnippet||''}`; const cidade=detectarCidade(texto); if(!cidade)continue;
-    const evento={id:item.guid||item.id||item.link||item.title,titulo:item.title||'Sem título',descricao:item.contentSnippet||'',fonte:feed.nome,url:item.link||null,imagem:item.enclosure?.url||null,data:item.isoDate||item.pubDate||new Date().toISOString(),tipo:classificar(texto),pais:cidade.pais,cidade:cidade.nome,lat:cidade.lat,lng:cidade.lng};
-    if(idsVistos.has(evento.id))continue; if(pool && !(await salvarEvento(evento)))continue; if(adicionarEventoMemoria(evento))novos.push(evento);
-  }}catch(e){console.error(`Erro ao ler feed ${feed.nome}:`,e.message);} await new Promise(r=>setTimeout(r,150)); }
-  if(novos.length){console.log(`${novos.length} novos eventos encontrados.`);broadcast({tipo:'novos_eventos',dados:novos});}else console.log('Nenhum evento novo.');
+  if(lendoFeeds) return;
+  lendoFeeds = true;
+  try {
+    console.log('[' + new Date().toISOString() + '] Atualizando feeds RSS...');
+    const novos = [];
+    for(const feed of FEEDS){
+      try {
+        const resultado = await parser.parseURL(feed.url);
+        for(const item of resultado.items){
+          const texto = (item.title || '') + ' ' + (item.contentSnippet || '');
+          const cidade = detectarCidade(texto);
+          if(!cidade) continue;
+          const evento = {
+            id:item.guid||item.id||item.link||item.title,
+            titulo:item.title||'Sem título',
+            descricao:item.contentSnippet||'',
+            fonte:feed.nome,
+            url:item.link||null,
+            imagem:(item.enclosure && item.enclosure.url)||null,
+            data:item.isoDate||item.pubDate||new Date().toISOString(),
+            tipo:classificar(texto),
+            pais:cidade.pais,
+            cidade:cidade.nome,
+            lat:cidade.lat,
+            lng:cidade.lng
+          };
+          if(idsVistos.has(evento.id)) continue;
+          // O mapa/feed não depende do banco: mantenha o evento em memória mesmo se a conexão falhar.
+          if(adicionarEventoMemoria(evento)) novos.push(evento);
+          if(dbPronto) await salvarEvento(evento);
+        }
+      } catch(e) {
+        console.error('Erro ao ler feed ' + feed.nome + ':', e.message);
+      }
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    if(dbPronto) await sincronizarEventosPendentes();
+    if(novos.length){
+      console.log(novos.length + ' novos eventos encontrados.');
+      broadcast({tipo:'novos_eventos',dados:novos});
+    } else {
+      console.log('Nenhum evento novo.');
+    }
+  } finally {
+    lendoFeeds = false;
+  }
 }
 function broadcast(m){const t=JSON.stringify(m);wss.clients.forEach(c=>{if(c.readyState===1)c.send(t);});}
 wss.on('connection',ws=>{ws.send(JSON.stringify({tipo:'todos_eventos',dados:eventos}));});
@@ -142,7 +242,7 @@ function sanitizarPreferencias(body){
 }
 
 app.post('/api/auth/register',async(req,res)=>{
-  if(!pool)return res.status(503).json({erro:'PostgreSQL não configurado.'});
+  if(!pool || !dbPronto) return res.status(503).json({erro:!pool?'PostgreSQL não configurado.':'Banco de dados reconectando. Tente novamente em alguns segundos.'});
   try{
     const nome=String(req.body.nome||'').trim().slice(0,80);
     const email=String(req.body.email||'').trim().toLowerCase();
@@ -161,7 +261,7 @@ app.post('/api/auth/register',async(req,res)=>{
   }
 });
 app.post('/api/auth/login',async(req,res)=>{
-  if(!pool)return res.status(503).json({erro:'PostgreSQL não configurado.'});
+  if(!pool || !dbPronto) return res.status(503).json({erro:!pool?'PostgreSQL não configurado.':'Banco de dados reconectando. Tente novamente em alguns segundos.'});
   try{
     const email=String(req.body.email||'').trim().toLowerCase();
     const senha=String(req.body.senha||'');
@@ -173,12 +273,14 @@ app.post('/api/auth/login',async(req,res)=>{
 });
 app.get('/api/auth/me',auth,(req,res)=>res.json({user:{id:req.user.id,nome:req.user.nome,email:req.user.email}}));
 app.get('/api/preferences',auth,async(req,res)=>{
+  if(!pool || !dbPronto) return res.status(503).json({erro:!pool?'PostgreSQL não configurado.':'Banco de dados reconectando. Tente novamente em alguns segundos.'});
   try{
     const r=await pool.query('SELECT countries,alerts,filters,updated_at FROM user_preferences WHERE user_id=$1',[req.user.id]);
     res.json(r.rows[0]||{countries:[],alerts:[],filters:{}});
   }catch(e){res.status(500).json({erro:'Não foi possível carregar suas preferências.'});}
 });
 app.put('/api/preferences',auth,async(req,res)=>{
+  if(!pool || !dbPronto) return res.status(503).json({erro:!pool?'PostgreSQL não configurado.':'Banco de dados reconectando. Tente novamente em alguns segundos.'});
   try{
     const p=sanitizarPreferencias(req.body||{});
     const r=await pool.query(`INSERT INTO user_preferences(user_id,countries,alerts,filters,updated_at)
@@ -192,7 +294,7 @@ app.put('/api/preferences',auth,async(req,res)=>{
 
 app.get('/api/eventos',(req,res)=>res.json(eventos));
 app.get('/api/historico',async(req,res)=>{
-  if(!pool)return res.status(503).json({erro:'PostgreSQL não configurado.'});
+  if(!pool || !dbPronto) return res.status(503).json({erro:!pool?'PostgreSQL não configurado.':'Banco de dados reconectando. Tente novamente em alguns segundos.'});
   try{
     const limite=Math.min(Math.max(Number(req.query.limit)||200,1),1000);
     const periodo=(req.query.periodo||'todos').toLowerCase();
@@ -231,7 +333,26 @@ app.get('/api/historico',async(req,res)=>{
     res.status(500).json({erro:'Não foi possível consultar o histórico.'});
   }
 });
-app.get('/health',async(req,res)=>{if(!pool)return res.status(503).json({status:'erro',banco:'não configurado'});try{await pool.query('SELECT 1');res.json({status:'ok',banco:'conectado',eventos_em_memoria:eventos.length});}catch(e){res.status(503).json({status:'erro',banco:'desconectado'});}});
+app.get('/health',async(req,res)=>{
+  if(!pool) return res.status(503).json({status:'erro',banco:'não configurado',eventos_em_memoria:eventos.length});
+  if(!dbPronto) return res.status(503).json({status:'aguardando',banco:'reconectando',eventos_em_memoria:eventos.length});
+  try {
+    await pool.query('SELECT 1');
+    res.json({status:'ok',banco:'conectado',eventos_em_memoria:eventos.length});
+  } catch(e) {
+    dbPronto = false;
+    registrarErroBanco('Falha no endpoint de saúde do PostgreSQL', e);
+    res.status(503).json({status:'erro',banco:'desconectado',eventos_em_memoria:eventos.length});
+  }
+});
 const PORTA=process.env.PORT||3000;
-async function iniciar(){console.log('Iniciando Conflict Radar...');if(await testarBanco()){try{await prepararBanco();await carregarHistorico();}catch(e){console.error('Erro ao preparar/carregar PostgreSQL:',e.message);}}else console.log('PostgreSQL indisponível no momento.');server.listen(PORTA,()=>{console.log(`Conflict Radar rodando na porta ${PORTA}`);lerFeeds();setInterval(lerFeeds,30000);});}
+function iniciar(){
+  console.log('Iniciando Conflict Radar...');
+  server.listen(PORTA,()=>{
+    console.log('Conflict Radar rodando na porta ' + PORTA);
+    void monitorarBanco();
+    void lerFeeds();
+    setInterval(()=>{ void lerFeeds(); },30000);
+  });
+}
 iniciar();
