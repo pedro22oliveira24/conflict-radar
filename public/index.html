@@ -53,6 +53,45 @@
         </div>
     </div>
 
+    <section id="filtros-avancados" aria-label="Filtros do mapa" style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;padding:12px 16px;background:#111827;border-bottom:1px solid #334155">
+        <label style="display:flex;flex-direction:column;gap:5px;color:#cbd5e1;font-size:12px">País / região
+            <select id="filtro-pais-mapa" style="min-width:170px;padding:8px;border-radius:6px">
+                <option value="">Todos os países</option>
+            </select>
+        </label>
+        <label style="display:flex;flex-direction:column;gap:5px;color:#cbd5e1;font-size:12px">Período
+            <select id="filtro-periodo-mapa" style="min-width:150px;padding:8px;border-radius:6px">
+                <option value="todos">Todo o período</option>
+                <option value="24h">Últimas 24 horas</option>
+                <option value="7d">Últimos 7 dias</option>
+                <option value="30d">Últimos 30 dias</option>
+            </select>
+        </label>
+        <label style="display:flex;flex-direction:column;gap:5px;color:#cbd5e1;font-size:12px">Data inicial
+            <input id="filtro-data-inicio" type="date" style="padding:7px;border-radius:6px">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:5px;color:#cbd5e1;font-size:12px">Data final
+            <input id="filtro-data-fim" type="date" style="padding:7px;border-radius:6px">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:5px;color:#cbd5e1;font-size:12px">Categoria
+            <select id="filtro-tipo-mapa" style="min-width:160px;padding:8px;border-radius:6px">
+                <option value="todos">Todas as categorias</option>
+                <option value="guerra">🔴 Guerra</option>
+                <option value="ataque">🟠 Ataque</option>
+                <option value="terrorismo">🟣 Terrorismo</option>
+                <option value="operacao_militar">🪖 Operação militar</option>
+                <option value="protesto">🟡 Protesto</option>
+                <option value="diplomacia">🔵 Diplomacia</option>
+                <option value="humanitario">🟢 Humanitário</option>
+                <option value="sancao">⚫ Sanção</option>
+                <option value="politica">🏛️ Política</option>
+                <option value="outro">⚪ Outro</option>
+            </select>
+        </label>
+        <button id="limpar-filtros-mapa" type="button" style="padding:9px 12px;border:1px solid #64748b;border-radius:6px;background:#1e293b;color:white;cursor:pointer">Limpar filtros</button>
+        <span id="resultado-filtros-mapa" aria-live="polite" style="color:#cbd5e1;font-size:12px;padding:8px 0">Aguardando eventos…</span>
+    </section>
+
     <div class="barra-territorios">
         <button onclick="alternarTerritorios()">🗺️ Mostrar/Ocultar territórios</button>
         <span class="territorio-chave"><i class="chave cor-azul"></i>Ucrânia</span>
