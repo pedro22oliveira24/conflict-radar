@@ -300,6 +300,60 @@ function renderizar() {
   atualizarContadores(lista);
   atualizarFeed(lista);
   atualizarTimeline(lista);
+  atualizarAnalises(lista);
+}
+
+// Estatísticas descritivas; não equivalem a verificação independente dos fatos.
+let graficosAnalise = {};
+function atualizarAnalises(lista) {
+  const agrupamento = document.getElementById('analise-agrupamento')?.value || 'dia';
+  const contar = (campo, fallback='Não informado') => {
+    const m = new Map();
+    lista.forEach(e => { const k = e[campo] || fallback; m.set(k, (m.get(k)||0)+1); });
+    return [...m.entries()].sort((a,b)=>b[1]-a[1]);
+  };
+  desenharGrafico('grafico-paises', 'bar', contar('pais').slice(0,10), 'Eventos');
+  const ordemTipos = ['guerra','ataque','terrorismo','operacao_militar','protesto','diplomacia','humanitario','sancao','politica','outro'];
+  const contagensTipo = new Map(contar('tipo'));
+  desenharGrafico('grafico-categorias', 'bar', ordemTipos.map(t=>[tipoLabel(t),contagensTipo.get(t)||0]), 'Eventos');
+  const temporal = new Map();
+  lista.forEach(e => {
+    const d = new Date(e.data || '');
+    if (!Number.isFinite(d.getTime())) return;
+    let chave;
+    if (agrupamento === 'mes') chave = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+    else if (agrupamento === 'semana') {
+      const inicio = new Date(d); const dia = (inicio.getDay()+6)%7; inicio.setDate(inicio.getDate()-dia); inicio.setHours(0,0,0,0);
+      chave = inicio.toLocaleDateString('pt-BR');
+    } else chave = d.toLocaleDateString('pt-BR');
+    temporal.set(chave,(temporal.get(chave)||0)+1);
+  });
+  const serie = [...temporal.entries()].sort((a,b)=>{
+    const parse = s => { if (agrupamento === 'mes') return Date.parse(s+'-01')||0; const p=s.split('/'); return p.length===3 ? new Date(+p[2],+p[1]-1,+p[0]).getTime() : 0; };
+    return parse(a[0])-parse(b[0]);
+  });
+  desenharGrafico('grafico-temporal','line',serie,'Notícias');
+  const resumo = document.getElementById('resumo-confiabilidade');
+  if (resumo) {
+    const comFonte = lista.filter(e => typeof e.fonte === 'string' && e.fonte.trim()).length;
+    const comLink = lista.filter(e => typeof e.url === 'string' && /^https?:\\/\\//i.test(e.url)).length;
+    resumo.innerHTML = '<div><strong>Eventos no recorte:</strong> '+lista.length+'</div>' +
+      '<div><strong>Com fonte identificada:</strong> '+comFonte+'</div>' +
+      '<div><strong>Com link para a notícia:</strong> '+comLink+'</div>' +
+      '<div style="margin-top:6px;color:#fbbf24"><strong>Relatos de fontes:</strong> '+lista.length+' — eventos derivados de notícias publicadas; podem conter alegações ainda não verificadas independentemente.</div>' +
+      '<div style="color:#94a3b8"><strong>Fatos confirmados independentemente:</strong> não são classificados automaticamente pelo sistema. “Não verificado” significa que o app não dispõe de confirmação independente registrada, e não que a notícia seja falsa.</div>';
+  }
+}
+function desenharGrafico(id, tipo, pares, rotulo) {
+  const canvas = document.getElementById(id);
+  if (!canvas || typeof Chart === 'undefined') return;
+  if (graficosAnalise[id]) graficosAnalise[id].destroy();
+  graficosAnalise[id] = new Chart(canvas, {
+    type: tipo,
+    data: { labels: pares.map(p=>p[0]), datasets: [{ label: rotulo, data: pares.map(p=>p[1]), borderWidth: 2, tension: .25 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { ticks: { maxRotation: 45, minRotation: 0 } } } }
+  });
+  canvas.parentElement.style.height = '280px';
 }
 
 function escaparHTML(valor) {
@@ -420,6 +474,8 @@ if (campoPesquisa) campoPesquisa.addEventListener('input', e => {
 });
 
 function inicializarFiltrosMapa() {
+  const agrupamentoAnalise = document.getElementById('analise-agrupamento');
+  if (agrupamentoAnalise) agrupamentoAnalise.addEventListener('change', () => atualizarAnalises(eventosFiltrados()));
   const paisSelect = document.getElementById('filtro-pais-mapa');
   const tipoSelect = document.getElementById('filtro-tipo-mapa');
   const periodoSelect = document.getElementById('filtro-periodo-mapa');
