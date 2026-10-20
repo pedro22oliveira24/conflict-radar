@@ -563,3 +563,26 @@ body.modal-aberto { overflow: hidden; }
   .container { height: auto; min-height: 0; }
   #map { height: 65vh; min-height: 380px; }
 }
+
+
+/* Correção de segurança: garantir que o mapa Leaflet tenha espaço próprio */
+.container {
+  display: flex;
+  width: 100%;
+  height: 60vh !important;
+  min-height: 420px !important;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+#map {
+  display: block !important;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100% !important;
+  min-height: 420px;
+  visibility: visible !important;
+}
+@media (max-width: 900px) {
+  .container { display: flex; flex-direction: column; height: auto !important; min-height: 0 !important; }
+  #map { flex: none; width: 100%; height: 65vh !important; min-height: 380px; }
+}
