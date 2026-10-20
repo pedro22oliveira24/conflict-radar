@@ -547,3 +547,19 @@ body.modal-aberto { overflow: hidden; }
   .acoes-conta { flex-wrap:wrap; justify-content:flex-end; }
   .botao-conta, .botao-cadastro { padding:9px 11px; font-size:12px; }
 }
+
+
+/* Layout do painel de análises: compacto para manter o mapa visível */
+#painel-analises { padding: 12px 14px !important; }
+#painel-analises > div:first-child { margin-bottom: 8px !important; }
+#painel-analises h2 { font-size: 20px; }
+#painel-analises > div:nth-of-type(2) > div { min-width: 0; }
+#painel-analises canvas { display: block; width: 100% !important; height: 190px !important; }
+#painel-analises > div:nth-of-type(2) > div { padding: 9px !important; }
+#painel-analises > div:last-child { margin-top: 9px !important; padding: 9px !important; }
+.container { height: max(420px, calc(100vh - 500px)); min-height: 420px; }
+@media (max-width: 900px) {
+  #painel-analises canvas { height: 180px !important; }
+  .container { height: auto; min-height: 0; }
+  #map { height: 65vh; min-height: 380px; }
+}
