@@ -586,3 +586,30 @@ body.modal-aberto { overflow: hidden; }
   .container { display: flex; flex-direction: column; height: auto !important; min-height: 0 !important; }
   #map { flex: none; width: 100%; height: 65vh !important; min-height: 380px; }
 }
+
+
+/* Final layout safeguard: map remains a large, visible section below analytics */
+#painel-analises { position: relative; }
+.container {
+  position: relative !important;
+  display: flex !important;
+  width: 100% !important;
+  height: 560px !important;
+  min-height: 560px !important;
+  max-height: none !important;
+  flex-shrink: 0 !important;
+  overflow: visible !important;
+}
+#map {
+  position: relative !important;
+  display: block !important;
+  width: 100% !important;
+  height: 560px !important;
+  min-height: 560px !important;
+  flex: 1 1 auto !important;
+  z-index: 1;
+}
+@media (max-width: 900px) {
+  .container { height: 65vh !important; min-height: 420px !important; }
+  #map { height: 65vh !important; min-height: 420px !important; }
+}
